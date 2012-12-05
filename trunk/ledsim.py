@@ -65,7 +65,7 @@ class GridOpts(GenericOpts,Access):
           Gridpoint spacing at edge of region, if variable grid is used. Default
           value is 2e-10 (0.2 nm)
         dzCenterFraction : float
-          Gridpoint spacing at center of region = dzCenterFraction * region thickness
+          Gridpoint spacing at center of region=dzCenterFraction*region thickness
           Default value is 0.04
         dzQuantum : float
           Gridpoint spacing thoughout the quantum regions. Default value is 2e-10
@@ -223,10 +223,12 @@ class Layer(Access):
     self.material  = material
     self.thickness = thickness
     self.isQuantum = kwargs['isQuantum'] if 'isQuantum' in kwargs.keys() else False
-    for attr, spec in material.matAttrs.items():
+    for attr, spec in material.layerAttrs.items():
+      self[attr] = spec['defaultValue']
+    for attr, spec in material.subAttrs.items():
       self[attr] = spec['defaultValue']
     for attr, value in kwargs.items():
-      if attr in material.matAttrs.keys() or attr in layerAttrs:
+      if attr in self.attrs():
         self[attr] = value
       else:
         raise AttributeError, '%s is not a valid attribute for %s' %(attr,material)
@@ -239,7 +241,7 @@ class Structure(Access):
   def is_complete(self):
     pass
 
-def build(layers,substrate=None,gridOpts=GridOpts(),buildOpts=None):
+def build(layers,substrate=None,gridOpts=GridOpts()):
   '''
   '''
   def get_index(zmin,zmax,grid):
@@ -248,15 +250,20 @@ def build(layers,substrate=None,gridOpts=GridOpts(),buildOpts=None):
     stopIndex  = len(match)-match[::-1].index(True)
     return startIndex,stopIndex
   
-  mat = layers[0].material
-  if [layer.material == mat for layer in layers] != [True]*len(layers):
+  if [layer.material == layers[0].material for layer in layers] != [True]*len(layers):
     raise ValueError, 'Build error: incompatible materials'
   if substrate == None:
     substrate = layers[0]
-    
+  mat = substrate.material()
+  kwargs = dict([(attr,substrate[attr]) for attr in mat.layerAttrs.keys()+mat.subAttrs.keys()])
+  calcAttrs = mat.calc_attrs(**kwargs)
+  for attr in calcAttrs.keys():
+    substrate[attr] = calcAttrs[attr]  
   s = Structure()
   s.grid = Grid(layers,gridOpts)
-  for attr in mat.matAttrs.keys():
+  for attr in mat.subAttrs.keys():
+    s[attr] = scipy.ones(s.grid.rnum)*substrate[attr]
+  for attr in mat.layerAttrs.keys():
     vec = scipy.zeros(s.grid.rnum)
     zmin = 0.
     for layer in layers:
@@ -264,16 +271,15 @@ def build(layers,substrate=None,gridOpts=GridOpts(),buildOpts=None):
       startIndex,stopIndex = get_index(zmin,zmax,s.grid)
       vec[startIndex:stopIndex] = layer[attr]
       zmin = zmax
-    Ld = mat.matAttrs[attr]['diffusionLength']
+    Ld = mat.layerAttrs[attr]['diffusionLength']
     s[attr] = calc.diffuse(vec,s.grid.dz,Ld)
-  
-  kwargs = dict([(attr,s[attr]) for attr in s.attrs()])
-  for attr in mat.calcAttrs:
-    s[attr] = mat.calcAttrs[attr](kwargs)
-
-  print kwargs
-  
-    
+  kwargs = dict([(attr,s[attr]) for attr in mat.layerAttrs.keys()+mat.subAttrs.keys()])
+  calcAttrs = mat.calc_attrs(**kwargs)
+  for attr, value in calcAttrs.items():
+    s[attr] = value
+#  derivAttrs = mat.get_derived_attrs(s,substrate)
+#  for attr, value in derivAttrs.items():
+#    s[attr] = value
   return s
 
 if __name__ == '__main__':  
