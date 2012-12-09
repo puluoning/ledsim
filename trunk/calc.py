@@ -1,8 +1,10 @@
+''' Calc module contains useful mathematical methods used throughout ledsim.
+'''
 import scipy
 
 def diffuse(a,dz,Ld):
-  ''' Diffuse the quantity a on the grid specified by dz. The diffusion length
-      is constant and given by Ld.
+  ''' Diffuse the quantity a on the grid specified by dz. The diffusion 
+      length is constant and given by Ld.
   '''
   if Ld == 0:
     return a

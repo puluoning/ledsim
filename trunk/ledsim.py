@@ -1,6 +1,6 @@
 import scipy
 import calc
-from material import *
+import material
 
 class Access():
   ''' Access class provides attribute and index access to the object dictionary.
@@ -57,23 +57,23 @@ class GridOpts(GenericOpts,Access):
   ''' GridOpts object specifies how the grid is assembled for a given structure.
       Note: units are in meters. GridOpts has the following attributes:
         useFixedGrid : Boolean
-          True if a fixed gridpoint spacing is to be used. Default value is False.
+          True if fixed gridpoint spacing is to be used. Default value is False.
         dz : float
           Gridpoint spacing if fixed grid is used. Ignored if variable spacing
           is specified. Default value is 5e-10 (0.5 nm)
         dzEdge : float
-          Gridpoint spacing at edge of region, if variable grid is used. Default
+          Gridpoint spacing at edge of layer, if variable grid is used. Default
           value is 2e-10 (0.2 nm)
         dzCenterFraction : float
-          Gridpoint spacing at center of region=dzCenterFraction*region thickness
+          Gridpoint spacing at center of layer=dzCenterFraction*layer thickness
           Default value is 0.04
         dzQuantum : float
-          Gridpoint spacing thoughout the quantum regions. Default value is 2e-10
+          Gridpoint spacing thoughout the quantum layers. Default value is 2e-10
         quantumPadLength : float
-          Distance beyond the quantum region where wavefunctions are calculated.
+          Distance beyond the quantum layer where wavefunctions are calculated.
           Default value is 10e-9
         quantumBlendLength : float
-          Length over which quantum carrier densities are blended with classical.
+          Length over which quantum carrier density is blended with classical.
           Default value is 3e-9
   '''
   validAttrs = ['useFixedGrid','dz','dzEdge','dzCenterFraction',
@@ -111,13 +111,13 @@ class SolverOpts(GenericOpts,Access):
           Maximum number of solver iterations per solve attempt. Default value
           is 100.
         maxitrOuter : int
-          Maximum number of solve attempts for a bias point. Default value is 20.
+          Maximum number of solve attempts for a bias point. Default is 20.
         Jmin : float
           Minimum current for use of current boundary condition. Units are Amps
           per square meter; default value is 1e-2 A/m**2
         dVmax : float
-          Maximum voltage step in voltage ramping. Units are volts; default value
-          is 0.5 V. 
+          Maximum voltage step in voltage ramping. Units are volts; default
+          value is 0.5 V. 
         verboseLevel : int 
           Determines level of diagnostic output. Default value is 1.
           1 : no output
@@ -140,6 +140,29 @@ class SolverOpts(GenericOpts,Access):
     self.Jmin                 = 1e-2
     self.dVmax                = 0.5
     self.verboseLevel         = 1
+    for attr, value in kwargs.items():
+      self.__setattr__(self,attr,value)
+
+class ModelOpts(GenericOpts,Access):
+  ''' ModelOpts controls models used in simulation. ModelOpts has the
+      following attributes:
+        polarization: float
+          factor which scales total calculated polarization. Can be used to
+          turn polarization off, i.e. with a value of 0.
+        cBandOffset: float
+          fraction of bandgap offset occuring in the conduction band
+        dkBulk: float
+          dk value used in calculating effective masses
+  '''
+  validAttrs = ['dkBulk','cBandOffset','polarization']
+  
+  def __init__(self,**kwargs):
+    ''' Construct the ModelOpts object. Keyword input arguments can be used to
+        override default values.
+    '''
+    self.polarization         = 1.
+    self.cBandOffset          = 0.7
+    self.dkBulk               = 1e9
     for attr, value in kwargs.items():
       self.__setattr__(self,attr,value)
 
@@ -184,8 +207,8 @@ class Grid(Access):
     self.gridOpts = gridOpts
 
   def get_dz_segment(self,d1,dn,L):
-    ''' Calculate the vector of gridpoint spacing given a segment of length L and
-        gridpoint spacings d1,dn specified at the two ends of the segment.
+    ''' Calculate the vector of gridpoint spacing given a segment of length L
+        and gridpoint spacings d1,dn specified at the two ends of the segment.
     '''
     if L < 2*max(d1,dn):
       raise ValueError, 'Grid error: gridpoint spacing is changing too rapidly'
@@ -207,11 +230,48 @@ class Grid(Access):
     remvec = 1-abs(scipy.linspace(-1,1,len(delvec)))
     return delvec+rem*remvec/sum(remvec)
 
+class Structure(Access):
+  ''' Structure class gives all the parameters of the structure which are
+      bias-independent.
+  '''
+  def __init__(self,grid,mat,substrate):
+    ''' The structure must be created with grid, material, and substrate
+        as input arguments.
+    '''
+    self.grid       = grid
+    self.material   = mat
+    self.substrate  = substrate
+    
+  def __getattribute__(self,attr):
+    ''' If the named attribute is in the __dict__, return it; otherwise, raise
+        an AttributeError. When this occurs, __getattr__ will be called.
+    '''
+    if attr in self.attrs():
+      return self[attr]
+    else:
+      return self.__getattr__(attr)
+    
+  def __getattr__(self,attr):
+    ''' Refer to the material object for attributes that are not already
+        part of the structure. If the material does not provide a means for
+        calculating the attribute, raise an AttributeError.
+    '''
+    if attr in self.material.attrSwitch.keys():
+      self.material.attrSwitch[attr](self,self.substrate)
+      if attr in self.attrs():
+        return self[attr]
+      else:
+        raise AttributeError, attr
+    else:
+      raise AttributeError, attr
+
 class Layer(Access):
-  ''' Layer object. A layer has a material type, a thickness, and an isQuantum
-      flag, which determines whether wavefunctions are calculated within the
-      layer. In addition, the layer can have any properties that the material
-      type may have (e.g. composition, dopant concentration, etc.).
+  ''' Layer object. The Layer object works in conjunction with the build
+      method to form a simple way to generate structures. A layer has a
+      material type, thickness, and an isQuantum flag, which determines  
+      whether wavefunctions are calculated within the layer. In addition,
+      the layer can have any properties that the material type may have,
+      e.g. composition, dopant concentration, etc.
   '''
   layerAttrs = ['material','thickness','isQuantum']
   
@@ -233,36 +293,29 @@ class Layer(Access):
       else:
         raise AttributeError, '%s is not a valid attribute for %s' %(attr,material)
 
-class Structure(Access):
-  
-  def __init__(self):
-    pass
-  
-  def is_complete(self):
-    pass
-
-def build(layers,substrate=None,gridOpts=GridOpts()):
-  '''
+def build(layers,substrate=None,gridOpts=GridOpts(),\
+          modelOpts=ModelOpts(),overrideAttrs={}):
+  ''' Build is one method of creating a structure. Build takes a list
+      of layers, generates the grid, and assigns the appropriate layer 
+      properties to the grid points. Grid options can be specified.
   '''
   def get_index(zmin,zmax,grid):
     match = ((zmin < grid.zr)*(grid.zr < zmax)).tolist()
     startIndex = match.index(True)
     stopIndex  = len(match)-match[::-1].index(True)
     return startIndex,stopIndex
-  
-  if [layer.material == layers[0].material for layer in layers] != [True]*len(layers):
-    raise ValueError, 'Build error: incompatible materials'
+
   if substrate == None:
-    substrate = layers[0]
-  mat = substrate.material()
-  kwargs = dict([(attr,substrate[attr]) for attr in mat.layerAttrs.keys()+mat.subAttrs.keys()])
-  calcAttrs = mat.calc_attrs(**kwargs)
-  for attr in calcAttrs.keys():
-    substrate[attr] = calcAttrs[attr]  
-  s = Structure()
-  s.grid = Grid(layers,gridOpts)
+    substrate = layers[0]  
+  if [layer.material == substrate.material for layer in layers] != [True]*len(layers):
+    raise ValueError, 'Build error: all layers must share the same material'
+  mat = substrate.material
+  sub = Structure(None,mat,None)
+  s = Structure(Grid(layers,gridOpts),mat,sub)
+  s.modelOpts = modelOpts
   for attr in mat.subAttrs.keys():
     s[attr] = scipy.ones(s.grid.rnum)*substrate[attr]
+    sub[attr] = substrate[attr]
   for attr in mat.layerAttrs.keys():
     vec = scipy.zeros(s.grid.rnum)
     zmin = 0.
@@ -273,19 +326,15 @@ def build(layers,substrate=None,gridOpts=GridOpts()):
       zmin = zmax
     Ld = mat.layerAttrs[attr]['diffusionLength']
     s[attr] = calc.diffuse(vec,s.grid.dz,Ld)
-  kwargs = dict([(attr,s[attr]) for attr in mat.layerAttrs.keys()+mat.subAttrs.keys()])
-  calcAttrs = mat.calc_attrs(**kwargs)
-  for attr, value in calcAttrs.items():
-    s[attr] = value
-#  derivAttrs = mat.get_derived_attrs(s,substrate)
-#  for attr, value in derivAttrs.items():
-#    s[attr] = value
+    sub[attr] = substrate[attr]
   return s
 
-if __name__ == '__main__':  
+if __name__ == '__main__':
+  
+  mat = material.AlGaInN()
 
-  layers = [Layer(AlGaInN,thickness=10e-9,x=0.0,y=0.0),
-            Layer(AlGaInN,thickness=10e-9,x=0.2,y=0.0),
-            Layer(AlGaInN,thickness=10e-9,x=0.0,y=0.0)]
+  layers = [Layer(mat,thickness=10e-9,x=0.0,y=0.0),
+            Layer(mat,thickness=10e-9,x=0.2,y=0.0),
+            Layer(mat,thickness=10e-9,x=0.0,y=0.0)]
 
   s = build(layers)
