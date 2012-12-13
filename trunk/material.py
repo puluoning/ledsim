@@ -1,6 +1,6 @@
-''' Material module contains material properties.
+''' Material module which contains material properties.
 '''
-import ledsim, scipy, scipy.constants, scipy.linalg
+import scipy, scipy.constants, scipy.linalg
 
 pi       = scipy.pi
 q        = scipy.constants.elementary_charge
@@ -11,15 +11,15 @@ hbar     = scipy.constants.hbar
 epsilon0 = scipy.constants.epsilon_0
 
 class AlGaInN():
-  ''' LEDSIM class for the AlGaInN material system. The AlGaInN class has
-      the following parameters:
+  ''' Class for the AlGaInN material system. The AlGaInN class has the following
+      parameters:
         layerAttrs : a collection of attributes that a layer of AlGaInN
           must have (e.g. composition, dopant density, etc.). In a
           structure, each of these will generally vary spatially. A diffusion
           length is given for each attribute, which characterizes the typical 
           length scale for variation in each parameter.
         subAttrs : a collection of attributes that an AlGaInN structure will
-          inherit from its substrate. This includes e.g. temperature (T).
+          inherit from its substrate. This includes e.g. dislocation density.
         attrSwitch: dictionary which specifies how attributes of the material
           are calculated, e.g. strained bandgap, lattice constants,
           polarization, etc.
@@ -45,15 +45,10 @@ class AlGaInN():
        'Ndef'       : {'defaultValue':1e17*1e6,'diffusionLength':2e-10}}
     
     # Set default subAttrs
-    # Ndis : threading dislocation density in the layer
-    # T : temperature
     # phi : 
     # theta :
-    # cBandOffset : relative conduction band offset
     self.subAttrs = \
-      {'Ndis'       : {'defaultValue':5e08*1e4},
-       'T'          : {'defaultValue':300     },
-       'phi'        : {'defaultValue':0.      },
+      {'phi'        : {'defaultValue':0.      },
        'theta'      : {'defaultValue':0.      }}
     
     # Dictionary that specifies how additional material parameters are
@@ -101,7 +96,6 @@ class AlGaInN():
        'Cp'         : self.get_basic_params,
        'Ndef'       : self.get_basic_params,
        'DEdef'      : self.get_basic_params,
-       'DEdis'      : self.get_basic_params,
        'CCSn'       : self.get_basic_params,
        'CCSp'       : self.get_basic_params,
        'epsxx'      : self.get_strain,
@@ -111,26 +105,29 @@ class AlGaInN():
        'epsyx'      : self.get_strain,
        'Ppz'        : self.get_polarization,
        'Ptot'       : self.get_polarization,
-       'Eg'         : self.get_band_parameters,
-       'Ec0'        : self.get_band_parameters,
-       'Ev0'        : self.get_band_parameters,
-       'mex'        : self.get_band_parameters,
-       'mey'        : self.get_band_parameters,
-       'mez'        : self.get_band_parameters,
-       'mhx'        : self.get_band_parameters,
-       'mhy'        : self.get_band_parameters,
-       'mhz'        : self.get_band_parameters,
-       'med'        : self.get_band_parameters,
-       'mhd'        : self.get_band_parameters,
-       'Nc'         : self.get_band_parameters,
-       'Nv'         : self.get_band_parameters}
+       'Eg'         : self.get_band_params,
+       'Ec0'        : self.get_band_params,
+       'Ev0'        : self.get_band_params,
+       'mex'        : self.get_band_params,
+       'mey'        : self.get_band_params,
+       'mez'        : self.get_band_params,
+       'mhx'        : self.get_band_params,
+       'mhy'        : self.get_band_params,
+       'mhz'        : self.get_band_params,
+       'med'        : self.get_band_params,
+       'mhd'        : self.get_band_params,
+       'Nc'         : self.get_band_params,
+       'Nv'         : self.get_band_params}
     
-    # Apply override attributes
+    # Apply override attributes. Note: only the attrs set by the method given
+    # by overrideAttrsMethod can be overridden. This method accepts only
+    # the structure as input, not the substrate.
+    self.overrideAttrsMethod = self.get_basic_params
     self.overrideAttrs = {}
     for attr, method in overrideAttrs.items():
       if attr in self.attrSwitch.keys() and \
         self.attrSwitch[attr] == self.get_basic_params:
-        self.overrideAttrs = overrideAttrs[attr]
+        self.overrideAttrs[attr] = overrideAttrs[attr]
       else:
         raise AttributeError, '%s is not an attr valid for override' %(attr)
     
@@ -144,7 +141,7 @@ class AlGaInN():
         else:
           raise AttributeError, 'Error applying %s:%s' %(attr,key)
     
-    # Apply subAttrs specified by user    
+    # Apply subAttrs specified by user
     for attr, spec in subAttrs.items():
       for key, value in spec.items():
         if attr in self.subAttrs.keys() and \
@@ -157,7 +154,7 @@ class AlGaInN():
     # dk value for calculation of effective masses
     self.__dkBulk__ = 1e9
     
-  def get_basic_params(self,s,sub):
+  def get_basic_params(self,s):
     ''' Basic parameters of the AlInGaN material system, which depend upon
         composition. These are calculated from Vegard's law with bowing
         parameters. Basic parameters may be overridden using the items in
@@ -184,7 +181,6 @@ class AlGaInN():
           Cp : e-h-h Auger coefficient
           Ndef  : defect density
           DEdef : defect energy relative to mid-gap
-          DEdis : dislocation energy relative to mid-gap
           CCSn  : capture cross-section for electrons by defects
           CCSp  : capture cross-section for holes by defects
     '''
@@ -221,7 +217,7 @@ class AlGaInN():
     s.d15     = ( 3.600*s.x+3.100*(1-s.x-s.y)+5.500*s.y)*1e-12
     s.Psp     = (-0.090*s.x-0.034*(1-s.x-s.y)-0.042*s.y\
                  -0.021*(s.x*(1-s.x-s.y))\
-                 +0.037*(s.y*(1-s.x-s.y))+0.070*(s.x*s.y))
+                 +0.037*(s.y*(1-s.x-s.y))+0.070*s.x*s.y)
     s.ENd     = ( 0.086*s.x+0.020*(1-s.x-s.y)+0.020*s.y)*eV
     s.ENa     = ( 0.630*s.x+0.170*(1-s.x-s.y)+0.170*s.y)*eV
     s.Ga      = ( 4.000*s.x+4.000*(1-s.x-s.y)+4.000*s.y)
@@ -230,20 +226,13 @@ class AlGaInN():
     s.muN0    = ( 200.0*s.x+200.0*(1-s.x-s.y)+200.0*s.y)*1e-4
     s.muP0    = ( 10.00*s.x+10.00*(1-s.x-s.y)+10.00*s.y)*1e-4
     s.B       = ( 20.00*s.x+24.00*(1-s.x-s.y)+6.600*s.y)*1e-12*1e-6
-    s.Cn      = ( 0.000*s.x+0.000*(1-s.x-s.y)+2.500*s.y)*1e-30*1e-12
-    s.Cp      = ( 0.000*s.x+0.000*(1-s.x-s.y)+2.500*s.y)*1e-30*1e-12
+    s.Cn      = ( 0.010*s.x+0.100*(1-s.x-s.y)+2.500*s.y)*1e-30*1e-12
+    s.Cp      = ( 0.010*s.x+0.100*(1-s.x-s.y)+2.500*s.y)*1e-30*1e-12
     s.DEdef   = ( 0.000*s.x+0.000*(1-s.x-s.y)+0.000*s.y)*eV
-    s.DEdis   = ( 0.000*s.x+0.000*(1-s.x-s.y)+0.000*s.y)*eV
     s.CCSn    = ( 1.000*s.x+1.000*(1-s.x-s.y)+1.000*s.y)*1e-18*1e-4
     s.CCSp    = ( 1.000*s.x+1.000*(1-s.x-s.y)+1.000*s.y)*1e-18*1e-4
-    for key, value in self.overrideAttrs:
-      if key in self.attrSwitch.keys():
-        if self.attrSwitch[key] == self.get_basic_params:
-          s[key] = value(s,sub)
-        else:
-          raise AttributeError, '%s is not an attribute which can be overridden' %(key)
-      else:
-        raise AttributeError, '%s is not a valid attribute for AlInGaN material' %(key)
+    for attr, method in self.overrideAttrs.items():
+      s[attr] = method(s)
 
   def get_strain(self,s,sub):
     ''' Calculate the strain components. C-axis orientation is assumed.
@@ -258,9 +247,9 @@ class AlGaInN():
     ''' Piezoelectric and total polarization.
     '''
     s.Ppz = -4*s.d13*(s.alc0-sub.alc0)/(s.alc0+sub.alc0)*(s.C11+s.C12-2*s.C13**2/s.C33)
-    s.Ptot = s.Ppz+s.Psp
+    s.Ptot = (s.Ppz+s.Psp)*s.modelOpts.polarization
         
-  def get_band_parameters(self,s,sub):
+  def get_band_params(self,s,sub):
     ''' Calculate parameters related to the band structure.
     '''
     dk = s.modelOpts.dkBulk
@@ -299,8 +288,8 @@ class AlGaInN():
     s.mhz = -mz[1:,:]
     s.med = (s.mex*s.mey*s.mez)**(1./3);
     s.mhd = (s.mhx*s.mhy*s.mhz)**(1./3);
-    s.Nc  = 1/scipy.sqrt(2)*(s.med*kB*s.T/(pi*hbar**2))**(3./2);
-    s.Nv  = 1/scipy.sqrt(2)*(s.mhd*kB*s.T/(pi*hbar**2))**(3./2);
+    s.Nc  = 1/scipy.sqrt(2)*(s.med*kB*s.modelOpts.T/(pi*hbar**2))**(3./2);
+    s.Nv  = 1/scipy.sqrt(2)*(s.mhd*kB*s.modelOpts.T/(pi*hbar**2))**(3./2);
 
   def bulk_bands_calculator(self,s,sub,kx,ky,kz):
     ''' Calculate the band energies for the specified kx, ky, and kz values.
@@ -329,5 +318,3 @@ class AlGaInN():
       w,v = scipy.linalg.eig(mat)
       E[1:,ii] = scipy.flipud(scipy.sort(scipy.real(w)))
     return E
-  
-  

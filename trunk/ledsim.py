@@ -1,6 +1,14 @@
-import scipy
-import calc
-import material
+''' Base module for LEDSIM.
+'''
+import scipy, pylab, calc, solve
+
+pi       = scipy.pi
+q        = scipy.constants.elementary_charge
+eV       = scipy.constants.electron_volt
+m0       = scipy.constants.electron_mass
+kB       = scipy.constants.Boltzmann
+hbar     = scipy.constants.hbar
+epsilon0 = scipy.constants.epsilon_0
 
 class Access():
   ''' Access class provides attribute and index access to the object dictionary.
@@ -141,11 +149,13 @@ class SolverOpts(GenericOpts,Access):
     self.dVmax                = 0.5
     self.verboseLevel         = 1
     for attr, value in kwargs.items():
-      self.__setattr__(self,attr,value)
+      self.__setattr__(attr,value)
 
 class ModelOpts(GenericOpts,Access):
   ''' ModelOpts controls models used in simulation. ModelOpts has the
       following attributes:
+        T : float
+          temperature of the simulation
         polarization: float
           factor which scales total calculated polarization. Can be used to
           turn polarization off, i.e. with a value of 0.
@@ -153,16 +163,27 @@ class ModelOpts(GenericOpts,Access):
           fraction of bandgap offset occuring in the conduction band
         dkBulk: float
           dk value used in calculating effective masses
+        defect : boolean
+          determines whether defect-assisted recombination is enabled
+        radiative : boolean
+          determines whether radiative recombination is enabled
+        auger : boolean
+          determines whether Auger recombination is enabled
   '''
-  validAttrs = ['dkBulk','cBandOffset','polarization']
+  validAttrs = ['T','dkBulk','cBandOffset','polarization','defect',
+                'radiative','auger']
   
   def __init__(self,**kwargs):
     ''' Construct the ModelOpts object. Keyword input arguments can be used to
         override default values.
     '''
+    self.T                    = 300.
     self.polarization         = 1.
     self.cBandOffset          = 0.7
     self.dkBulk               = 1e9
+    self.defect               = True
+    self.radiative            = True
+    self.auger                = True
     for attr, value in kwargs.items():
       self.__setattr__(self,attr,value)
 
@@ -243,8 +264,8 @@ class Structure(Access):
     self.substrate  = substrate
     
   def __getattribute__(self,attr):
-    ''' If the named attribute is in the __dict__, return it; otherwise, raise
-        an AttributeError. When this occurs, __getattr__ will be called.
+    ''' If the structure object already has the requested attribute, return it;
+        otherwise, call __getattr__.
     '''
     if attr in self.attrs():
       return self[attr]
@@ -257,13 +278,21 @@ class Structure(Access):
         calculating the attribute, raise an AttributeError.
     '''
     if attr in self.material.attrSwitch.keys():
-      self.material.attrSwitch[attr](self,self.substrate)
+      if self.material.attrSwitch[attr] == self.material.overrideAttrsMethod:
+        self.material.attrSwitch[attr](self)
+      else:
+        self.material.attrSwitch[attr](self,self.substrate)
       if attr in self.attrs():
         return self[attr]
       else:
         raise AttributeError, attr
     else:
       raise AttributeError, attr
+    
+  def valid_attr_list(self):
+    ''' Return the list of valid attributes for the structure.
+    '''
+    return self.material.attrSwitch.keys()
 
 class Layer(Access):
   ''' Layer object. The Layer object works in conjunction with the build
@@ -294,10 +323,11 @@ class Layer(Access):
         raise AttributeError, '%s is not a valid attribute for %s' %(attr,material)
 
 def build(layers,substrate=None,gridOpts=GridOpts(),\
-          modelOpts=ModelOpts(),overrideAttrs={}):
-  ''' Build is one method of creating a structure. Build takes a list
-      of layers, generates the grid, and assigns the appropriate layer 
-      properties to the grid points. Grid options can be specified.
+          modelOpts=ModelOpts(),solverOpts=SolverOpts()):
+  ''' Build takes a list of layers and creates a structure; the equilibrium
+      condition is calculated and returned. Optionally, the substrate can
+      be specified, and grid options and model options can be supplied. Also,
+      solverOpts used in calculation of equilibrium condition can be provided.
   '''
   def get_index(zmin,zmax,grid):
     match = ((zmin < grid.zr)*(grid.zr < zmax)).tolist()
@@ -327,14 +357,6 @@ def build(layers,substrate=None,gridOpts=GridOpts(),\
     Ld = mat.layerAttrs[attr]['diffusionLength']
     s[attr] = calc.diffuse(vec,s.grid.dz,Ld)
     sub[attr] = substrate[attr]
-  return s
-
-if __name__ == '__main__':
-  
-  mat = material.AlGaInN()
-
-  layers = [Layer(mat,thickness=10e-9,x=0.0,y=0.0),
-            Layer(mat,thickness=10e-9,x=0.2,y=0.0),
-            Layer(mat,thickness=10e-9,x=0.0,y=0.0)]
-
-  s = build(layers)
+  c1 = solve.solve_equilibrium_local(s,solverOpts=solverOpts)
+  c2 = solve.solve_equilibrium(c1,solverOpts=solverOpts)
+  return c2
