@@ -1,6 +1,6 @@
 '''
 '''
-import scipy, scipy.constants, scipy.sparse.linalg, ledsim, dynamic, calc
+import scipy, scipy.constants, scipy.sparse.linalg, dynamic, calc
 
 pi       = scipy.pi
 q        = scipy.constants.elementary_charge
@@ -10,13 +10,63 @@ kB       = scipy.constants.Boltzmann
 hbar     = scipy.constants.hbar
 epsilon0 = scipy.constants.epsilon_0
 
+class SolverOpts(calc.GenericOpts,calc.Access):
+  ''' SolverOpts controls methods used in the solve module. SolverOpts has the
+      following attributes:
+        dphi : float
+          Increment used in numerical evaluation of derivatives with respect to
+          electrostatic potential phi and quasi-potentials phiN and phiP. Units
+          are volts; default value is 1e-9 V.
+        maxAllowedCorrection : float
+          Maximum allowed correction per solver iteration. Units are volts;
+          default value is 0.1 V.
+        convergenceThreshold : float
+          Solution is considered converged once the magnitude of the correction
+          is smaller than convergenceThreshold. Units are volts; default value
+          is 5e-8 V.
+        maxitr : int
+          Maximum number of solver iterations per solve attempt. Default value
+          is 100.
+        maxitrOuter : int
+          Maximum number of solve attempts for a bias point. Default is 20.
+        Jmin : float
+          Minimum current for use of current boundary condition. Units are Amps
+          per square meter; default value is 1e-2 A/m**2
+        dVmax : float
+          Maximum voltage step in voltage ramping. Units are volts; default
+          value is 0.5 V. 
+        verboseLevel : int 
+          Determines level of diagnostic output. Default value is 1.
+          1 : no output
+          2 : 1 + output in bias wrapper
+          3 : 2 + output per call to solver
+          4 : 3 + output per solver iteration
+  ''' 
+  validAttrs = ['dphi','maxAllowedCorrection','convergenceThreshold',
+                'maxitr','maxitrOuter','Jmin','dVmax','verboseLevel']
+  
+  def __init__(self,**kwargs):
+    ''' Construct the SolverOpts object. Keyword input arguments can be used to
+        override default values.
+    '''
+    self.dphi                 = 1e-9
+    self.maxAllowedCorrection = 0.1
+    self.convergenceThreshold = 5e-8
+    self.maxitr               = 100
+    self.maxitrOuter          = 20
+    self.Jmin                 = 1e-2
+    self.dVmax                = 0.5
+    self.verboseLevel         = 1
+    for attr, value in kwargs.items():
+      self.__setattr__(attr,value)
+
 def out_printer(itr,err,solverOpts):
   '''
   '''
   if solverOpts.verboseLevel >= 4:
     print '    Iteration '+str(itr)+'; Error = '+('+' if err > 0 else '')+str(err)
 
-def solve_equilibrium_local(struct,solverOpts=ledsim.SolverOpts()):
+def solve_equilibrium_local(struct,solverOpts=SolverOpts()):
   ''' Solves for the condition that yields charge neutrality at each gridpoint.
       Note that the input type for this method is an ledsim.Structure rather
       than a dynamic.Condition. Return type is a dynamic.Condition. Options
@@ -70,7 +120,7 @@ def solve_equilibrium_local(struct,solverOpts=ledsim.SolverOpts()):
   else:
     raise ValueError, 'solve.solve_equilibrium failed to converge!'
 
-def solve_equilibrium(initialCond,solverOpts=ledsim.SolverOpts()):
+def solve_equilibrium(initialCond,solverOpts=SolverOpts()):
   ''' Solves the Poisson equation, i.e. the condition of zero applied bias. The
       input is an initial dynamic.Condition which represents the guess at the
       solution. Solver options may be specified via solverOpts. 
@@ -122,7 +172,7 @@ def solve_equilibrium(initialCond,solverOpts=ledsim.SolverOpts()):
   else:
     raise ValueError, 'Solver failed to converge!'
   
-def solve_nonequilibrium(initialCond,solverOpts=ledsim.SolverOpts(),Jtarget=None):
+def solve_nonequilibrium(initialCond,solverOpts=SolverOpts(),Jtarget=None):
   ''' Solves the drift-diffusion system, i.e. the Poisson equation together with
       continuity equations for electrons and holes. A target current density may
       be specified using Jtarget (units are A/m2). If no current is specified, 
@@ -283,7 +333,7 @@ def solve_nonequilibrium(initialCond,solverOpts=ledsim.SolverOpts(),Jtarget=None
   else:
     raise ValueError, 'Solver failed to converge!'
  
-def bias(initialCond,solverOpts=ledsim.SolverOpts(),Vtarget=None,Jtarget=None):
+def bias(initialCond,solverOpts=SolverOpts(),Vtarget=None,Jtarget=None):
   ''' Solve for the structure at the specified voltage or current.
   '''  
   def solve_prep(cond,Vtarget,solverOpts):
