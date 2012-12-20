@@ -10,58 +10,7 @@ kB       = scipy.constants.Boltzmann
 hbar     = scipy.constants.hbar
 epsilon0 = scipy.constants.epsilon_0
 
-class Access():
-  ''' Access class provides attribute and index access to the object dictionary.
-  '''
-  def __setattr__(self,attr,value):
-    ''' Set the specified attribute to the given value. Note that __setattr__
-        directly accesses the object dictionary.
-    '''
-    self.__dict__[attr] = value
-  
-  def __setitem__(self,attr,value):
-    ''' Set the specified attribute to the given value. Note that __setitem__
-        merely calls __setattr__ instead of accessing the object dictionary.
-        For classes inheriting from Access, it is sufficient to overload
-        __setattr__ to change the behavior of both methods.
-    '''
-    self.__setattr__(attr,value)
-   
-  def __getitem__(self,attr):
-    ''' Get the specified attribute by accessing the object dictionary.
-    '''
-    return self.__dict__[attr]
-  
-  def attrs(self):
-    ''' Return the keys of the object dictionary.
-    '''
-    return self.__dict__.keys()
-
-class GenericOpts():
-  ''' GenericOpts implements standard methods for options objects, such as
-      GridOpts and SolverOpts. Inherits from Access to provide attribute
-      and index access to object attributes. __setattr__ is overloaded to
-      prevent setting of attributes which are not valid for the class.
-  '''
-  def __setattr__(self,attr,value):
-    ''' Set the specified attribute to the given value, checking to make sure
-        that the attribute is valid/allowed.
-    '''
-    if attr not in self.validAttrs:
-      raise AttributeError, 'Opts error: %s is not a valid option' %(attr)
-    else:
-      self.__dict__[attr] = value
-  
-  def __str__(self):
-    ''' Print the attributes of this object 
-    '''
-    outStr = ''
-    attrWidthMax = max([len(attr) for attr in self.validAttrs]) 
-    for attr in self.validAttrs:
-      outStr += attr.ljust(attrWidthMax)+' : '+str(self.__dict__[attr])+'\n'
-    return outStr
-
-class GridOpts(GenericOpts,Access):
+class GridOpts(calc.GenericOpts,calc.Access):
   ''' GridOpts object specifies how the grid is assembled for a given structure.
       Note: units are in meters. GridOpts has the following attributes:
         useFixedGrid : Boolean
@@ -101,57 +50,7 @@ class GridOpts(GenericOpts,Access):
     for attr, value in kwargs.items():
       self.__setattr__(attr,value)
 
-class SolverOpts(GenericOpts,Access):
-  ''' SolverOpts controls methods used in the solve module. SolverOpts has the
-      following attributes:
-        dphi : float
-          Increment used in numerical evaluation of derivatives with respect to
-          electrostatic potential phi and quasi-potentials phiN and phiP. Units
-          are volts; default value is 1e-9 V.
-        maxAllowedCorrection : float
-          Maximum allowed correction per solver iteration. Units are volts;
-          default value is 0.1 V.
-        convergenceThreshold : float
-          Solution is considered converged once the magnitude of the correction
-          is smaller than convergenceThreshold. Units are volts; default value
-          is 5e-8 V.
-        maxitr : int
-          Maximum number of solver iterations per solve attempt. Default value
-          is 100.
-        maxitrOuter : int
-          Maximum number of solve attempts for a bias point. Default is 20.
-        Jmin : float
-          Minimum current for use of current boundary condition. Units are Amps
-          per square meter; default value is 1e-2 A/m**2
-        dVmax : float
-          Maximum voltage step in voltage ramping. Units are volts; default
-          value is 0.5 V. 
-        verboseLevel : int 
-          Determines level of diagnostic output. Default value is 1.
-          1 : no output
-          2 : 1 + output in bias wrapper
-          3 : 2 + output per call to solver
-          4 : 3 + output per solver iteration
-  ''' 
-  validAttrs = ['dphi','maxAllowedCorrection','convergenceThreshold',
-                'maxitr','maxitrOuter','Jmin','dVmax','verboseLevel']
-  
-  def __init__(self,**kwargs):
-    ''' Construct the SolverOpts object. Keyword input arguments can be used to
-        override default values.
-    '''
-    self.dphi                 = 1e-9
-    self.maxAllowedCorrection = 0.1
-    self.convergenceThreshold = 5e-8
-    self.maxitr               = 100
-    self.maxitrOuter          = 20
-    self.Jmin                 = 1e-2
-    self.dVmax                = 0.5
-    self.verboseLevel         = 1
-    for attr, value in kwargs.items():
-      self.__setattr__(attr,value)
-
-class ModelOpts(GenericOpts,Access):
+class ModelOpts(calc.GenericOpts,calc.Access):
   ''' ModelOpts controls models used in simulation. ModelOpts has the
       following attributes:
         T : float
@@ -169,9 +68,14 @@ class ModelOpts(GenericOpts,Access):
           determines whether radiative recombination is enabled
         auger : boolean
           determines whether Auger recombination is enabled
+        quantumDeltaE : float
+          Determines the energy beyond band extremum where wavefunctions are
+          calculated.
+        dkQuantum : float
+          dk value for quantum calculation of carrier density
   '''
   validAttrs = ['T','dkBulk','cBandOffset','polarization','defect',
-                'radiative','auger']
+                'radiative','auger','quantumDeltaE','dkQuantum']
   
   def __init__(self,**kwargs):
     ''' Construct the ModelOpts object. Keyword input arguments can be used to
@@ -184,10 +88,12 @@ class ModelOpts(GenericOpts,Access):
     self.defect               = True
     self.radiative            = True
     self.auger                = True
+    self.quantumDeltaE        = 0.1*eV
+    self.dkQuantum            = 3e7
     for attr, value in kwargs.items():
       self.__setattr__(self,attr,value)
 
-class Grid(Access):
+class Grid(calc.Access):
   ''' Grid object contains the grid information for a structure. The object has
       the following attributes:
         dz : scipy.array
@@ -225,7 +131,7 @@ class Grid(Access):
     self.zr       = (self.z[:-1]+self.z[1:])/2
     self.znum     = len(self.z)
     self.rnum     = len(self.zr)
-    self.gridOpts = gridOpts
+    self.gridOpts = gridOpts     
 
   def get_dz_segment(self,d1,dn,L):
     ''' Calculate the vector of gridpoint spacing given a segment of length L
@@ -251,7 +157,7 @@ class Grid(Access):
     remvec = 1-abs(scipy.linspace(-1,1,len(delvec)))
     return delvec+rem*remvec/sum(remvec)
 
-class Structure(Access):
+class Structure(calc.Access):
   ''' Structure class gives all the parameters of the structure which are
       bias-independent.
   '''
@@ -294,7 +200,7 @@ class Structure(Access):
     '''
     return self.material.attrSwitch.keys()
 
-class Layer(Access):
+class Layer(calc.Access):
   ''' Layer object. The Layer object works in conjunction with the build
       method to form a simple way to generate structures. A layer has a
       material type, thickness, and an isQuantum flag, which determines  
@@ -322,19 +228,22 @@ class Layer(Access):
       else:
         raise AttributeError, '%s is not a valid attribute for %s' %(attr,material)
 
+def get_index(zmin,zmax,grid):
+  ''' Find the starting and stopping indices of regions within the bounds
+      specified by zmin and zmax.
+  '''
+  match = ((zmin < grid.zr)*(grid.zr < zmax)).tolist()
+  startIndex = match.index(True)
+  stopIndex  = len(match)-match[::-1].index(True)
+  return startIndex,stopIndex
+
 def build(layers,substrate=None,gridOpts=GridOpts(),\
-          modelOpts=ModelOpts(),solverOpts=SolverOpts()):
+          modelOpts=ModelOpts(),solverOpts=solve.SolverOpts()):
   ''' Build takes a list of layers and creates a structure; the equilibrium
       condition is calculated and returned. Optionally, the substrate can
       be specified, and grid options and model options can be supplied. Also,
       solverOpts used in calculation of equilibrium condition can be provided.
   '''
-  def get_index(zmin,zmax,grid):
-    match = ((zmin < grid.zr)*(grid.zr < zmax)).tolist()
-    startIndex = match.index(True)
-    stopIndex  = len(match)-match[::-1].index(True)
-    return startIndex,stopIndex
-
   if substrate == None:
     substrate = layers[0]  
   if [layer.material == substrate.material for layer in layers] != [True]*len(layers):

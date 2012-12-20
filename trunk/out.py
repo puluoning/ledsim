@@ -1,6 +1,6 @@
 ''' Plotting methods.
 '''
-import scipy, pylab
+import scipy, scipy.constants, pylab
 
 pi       = scipy.pi
 q        = scipy.constants.elementary_charge
@@ -27,9 +27,6 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
   def interp_lr(La,Ra):
     return scipy.hstack((Ra[0],0.5*(La[1:-1]+Ra[1:-1]),La[-1]))
   
-  def stretch(a,step):
-    return a[scipy.sort(range(len(a))*step)]
-  
   def interleave(a,b):
     c = scipy.zeros(2*len(a))
     c[ ::2] = a
@@ -49,11 +46,11 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
       EfnPlot =  cond.phiN-cond.phi
       EfpPlot =  cond.phiP-cond.phi
     else:
-      zp = stretch(cond.grid.z,2)[1:-1]*1e9
-      EcPlot  = -stretch(cond.phi,2)[1:-1]+stretch(cond.Ec0,2)/eV 
-      EvPlot  = -stretch(cond.phi,2)[1:-1]+stretch(cond.Ev0[0,:],2)/eV
-      EfnPlot =  stretch(cond.phiN-cond.phi,2)[1:-1]
-      EfpPlot =  stretch(cond.phiP-cond.phi,2)[1:-1]
+      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
+      EcPlot  = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ec0,2)/eV 
+      EvPlot  = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ev0[0,:],2)/eV
+      EfnPlot =  calc.stretch(cond.phiN-cond.phi,2)[1:-1]
+      EfpPlot =  calc.stretch(cond.phiP-cond.phi,2)[1:-1]
     pylab.plot(zp,EcPlot,'k',zp,EvPlot,'k',zp,EfnPlot,'r',zp,EfpPlot,'b')
     pylab.xlim([0,zp[-1]])
     pylab.ylabel('Energy [eV]')
@@ -70,11 +67,11 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
       NdIonizedPlot = interp_lr(cond.LNdIonized,cond.RNdIonized)*1e-6
       NaIonizedPlot = interp_lr(cond.LNaIonized,cond.RNaIonized)*1e-6
     else:
-      zp = stretch(cond.grid.z,2)[1:-1]*1e9
+      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
       nPlot = interleave(cond.Ln,cond.Rn)[1:-1]*1e-6
       pPlot = interleave(cond.Lp,cond.Rp)[1:-1]*1e-6
-      NdPlot = stretch(cond.Nd,2)*1e-6
-      NaPlot = stretch(cond.Na,2)*1e-6
+      NdPlot = calc.stretch(cond.Nd,2)*1e-6
+      NaPlot = calc.stretch(cond.Na,2)*1e-6
       NdIonizedPlot = interleave(cond.LNdIonized,cond.RNdIonized)[1:-1]*1e-6
       NaIonizedPlot = interleave(cond.LNaIonized,cond.RNaIonized)[1:-1]*1e-6
 
@@ -96,7 +93,7 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
       RaugPlot = interp_lr(cond.LRaug,cond.RRaug)*1e-6
       RtotPlot = interp_lr(cond.LRtot,cond.RRtot)*1e-6
     else:
-      zp = stretch(cond.grid.z,2)[1:-1]*1e9
+      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
       RdefPlot = interleave(cond.LRdef,cond.RRdef)[1:-1]*1e-6
       RradPlot = interleave(cond.LRrad,cond.RRrad)[1:-1]*1e-6
       RaugPlot = interleave(cond.LRaug,cond.RRaug)[1:-1]*1e-6
