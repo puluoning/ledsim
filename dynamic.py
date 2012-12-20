@@ -1,7 +1,7 @@
 ''' Module for Condition class, which is used to calculate dynamical variables,
     e.g. carrier concentration, which depend upon the electrical bias.
 '''
-import scipy, scipy.constants, ledsim, out
+import scipy, scipy.constants, calc, out
 
 pi       = scipy.pi
 q        = scipy.constants.elementary_charge
@@ -11,7 +11,7 @@ kB       = scipy.constants.Boltzmann
 hbar     = scipy.constants.hbar
 epsilon0 = scipy.constants.epsilon_0
 
-class Condition(ledsim.Access):
+class Condition(calc.Access):
   ''' Class for dynamically calculated attributes, i.e. those which depend
       upon the bias. Each condition has an associated structure, and attributes
       of the structure may be referenced directly as though they were
