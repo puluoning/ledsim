@@ -1,79 +1,7 @@
 ''' Calc module contains useful mathematical methods used throughout ledsim.
 '''
-import scipy
+from ledsim import *
 
-class Access():
-  ''' Access class provides attribute and index access to the object dictionary.
-  '''
-  def __setattr__(self,attr,value):
-    ''' Set the specified attribute to the given value. Note that __setattr__
-        directly accesses the object dictionary.
-    '''
-    self.__dict__[attr] = value
-  
-  def __setitem__(self,attr,value):
-    ''' Set the specified attribute to the given value. Note that __setitem__
-        merely calls __setattr__ instead of accessing the object dictionary.
-        For classes inheriting from Access, it is sufficient to overload
-        __setattr__ to change the behavior of both methods.
-    '''
-    self.__setattr__(attr,value)
-   
-  def __getitem__(self,attr):
-    ''' Get the specified attribute by accessing the object dictionary.
-    '''
-    return self.__dict__[attr]
-  
-  def attrs(self):
-    ''' Return the keys of the object dictionary.
-    '''
-    return self.__dict__.keys()
-  
-class GenericOpts():
-  ''' GenericOpts implements standard methods for options objects, such as
-      GridOpts and SolverOpts. __setattr__ is overloaded to prevent setting
-      of attributes which are not valid for the class.
-  '''
-  def __setattr__(self,attr,value):
-    ''' Set the specified attribute to the given value, checking to make sure
-        that the attribute is valid/allowed.
-    '''
-    if attr not in self.validAttrs:
-      raise AttributeError, 'Opts error: %s is not a valid option' %(attr)
-    else:
-      self.__dict__[attr] = value
-  
-  def __str__(self):
-    ''' Print the attributes of this object 
-    '''
-    outStr = ''
-    attrWidthMax = max([len(attr) for attr in self.validAttrs]) 
-    for attr in self.validAttrs:
-      outStr += attr.ljust(attrWidthMax)+' : '+str(self.__dict__[attr])+'\n'
-    return outStr
-
-def diffuse(a,dz,Ld):
-  ''' Diffuse the quantity a on the grid specified by dz. The diffusion 
-      length is constant and given by Ld.
-  '''
-  if Ld == 0:
-    return a
-  else:
-    b = scipy.copy(a)
-    T = 1.
-    D = Ld**2/(4*T)
-    D = D*scipy.ones(len(dz))
-    rnum   = len(dz)
-    dtmax  = 0.25/max(D/dz**2)
-    nsteps = max(rnum,scipy.ceil(T/dtmax))
-    dt     = T/nsteps;
-    ind1   = range(1,rnum)+[rnum-1]
-    ind2   = [0]+range(0,rnum-1)
-    for ii in scipy.arange(0,nsteps):
-      b[1:-1] = (b+dt/(dz*(dz+dz[ind1]))*(D+D[ind1])*(b[ind1]-b)+ \
-                   dt/(dz*(dz+dz[ind2]))*(D+D[ind2])*(b[ind2]-b))[1:-1]
-    return b
-  
 def alternate(a,b):
   ''' Alternate the elements of vectors a and b. The result vector's first 
       element is the first element from a; the second element is the second 
@@ -99,59 +27,167 @@ def sort(a,order='descend'):
   if order not in ['ascend','descend']:
     raise ValueError, 'Specified ordering was not understood!'
   ind = scipy.argsort(a)
-  if order == 'ascend':
-    ind = scipy.flipud(ind)
+  if order == 'descend':
+    ind = ind[::-1]
   return a[ind], ind
 
-def eigs_range(mat,eigRange,k=40,overlap=2,offset=2,tol=1e-6,maxitr=2,forcePairs=True):
-  ''' Calculate the eigenvalues for matrix mat within the range given by
-      eigRange. This is done my multiple calls to eigs, each time searching
-      for k eigenvalues. eigRange should start with the eigenvalue spectrum
-      extremum.
+def eq_tol(a,b,tol=1e-6):
+  ''' Check whether a and b are equal within the specified tolerance.
   '''
-  def eigs_sorted(mat,k,sigma,forcePairs):
-    eigval,eigvec = scipy.sparse.linalg.eigs(mat,k=k,sigma=sigma)
-    w,ind = sort(scipy.real(eigval),'descend')
-    v = eigvec[:,ind]
-    if forcePairs and w[-1] != w[-2]:
-      return w[:-1],v[:,:-1]      
-    else:
-      return w,v
-  def merge(w1,v1,w2,v2,overlap,tol):
-    isGap  = (w2[0]-w1[-1-overlap])/w2[0] > tol
-    newInd = scipy.array([False]*len(w2))
-    for ii in range(0,len(newInd)):
-      newInd[ii] = scipy.prod(abs((w2[ii]-w1)/w2[ii]) > tol) > 0
-    w,ind  = sort(scipy.concatenate((w1,w2[newInd])),'descend')
+  return abs(0.5*(a-b)/(a+b)) < tol
+
+def neq_tol(a,b,tol=1e-6):
+  ''' Check whether a and b are unequal allowing for the specified tolerance.
+  '''
+  return not eq_tol(a,b,tol)
+
+def leq_tol(a,b,tol=1e-6):
+  ''' Check whether a is less or equal to b allowing for the specified tolerance.
+  '''
+  return a < b or eq_tol(a,b,tol)
+
+def geq_tol(a,b,tol=1e-6):
+  ''' Check whether a is greater or equal to b allowing for the specified tolerance.
+  '''
+  return a > b or eq_tol(a,b,tol)
+
+def merge_eigs(eigsDict,tol=1e-6):
+  ''' Merge the eigenvectors/eigenvalues which are the items of the dictionary 
+      eigsDict. Duplicate eigenvectors/eigenvalues are discarded. Eigenvectors
+      a and b are considered equal if eq_tol(a'.b,a'.a,tol)
+  '''
+  def merge(w1,v1,w2,v2):
+    newInd = scipy.array([scipy.prod(abs((w2[ii]-w1)/w2[ii]) > tol) > 0 for ii in range(len(w2))])
+    w,ind  = sort(scipy.concatenate((w1,w2[newInd])),'ascend')
     v = scipy.hstack((v1,v2[:,newInd]))[:,ind]
-    return w,v,isGap
-  isReverse = False
-  factor = 1.
-  if eigRange[0] > eigRange[1]:
-    factor    = -1.
-    eigRange  = [-val for val in eigRange]
-    isReverse = True
-  w,v = eigs_sorted(factor*mat,k,eigRange[0],forcePairs)
-  done = max(w) > eigRange[-1]
-  space = scipy.mean(w[1:]-w[:-1])
-  guess = w[-1]+space*(k/2-offset)
-  itr = 0
+    return w,v
+  guesses = scipy.sort(eigsDict.keys())
+  w,v = eigsDict[guesses[0]]
+  for guess in guesses[1:]:
+    w2,v2 = eigsDict[guess]
+    w,v = merge(w,v,w2,v2)
+  return w,v
+
+def eigs_sorted(mat,sigma,k,isTime=False):
+  ''' Get k eigenvalues for the matrix mat using sigma as the guess. If
+      isTiming is True, then the raw time spent in scipy.sparse.linalg.eigs
+      is returned. The eigenvectors are scaled so that the phase is equal 
+      to zero where the magnitude is largest.
+  '''
+  t0 = time.time()
+  eigval,eigvec = scipy.sparse.linalg.eigs(mat,k=k,sigma=sigma)
+  eigsTime = time.time()-t0
+  w,ind = sort(scipy.real(eigval),'ascend')
+  v = eigvec[:,ind]
+  indMax = scipy.argmax(abs(v),0)
+  for ii in range(len(w)):
+    v[:,ii] = v[:,ii]/v[indMax[ii],ii]*abs(v[indMax[ii],ii])
+  if isTime:
+    return w,v,eigsTime
+  else:
+    return w,v
+
+def eigs_range(mat,startVal,endVal,k=24,tol=1e-6,guessOffset=2,maxitr=100,isGetStats=False):
+  ''' Find all the eigenvalues of mat between startVal and endVal. This is done
+      with multiple calls to scipy.sparse.linalg.eigs, finding k eigenvalues at
+      a time. At most maxitr calls are made; if this number is reached without
+      finding all eigenvalues, an error is raised.
+  '''
+  def prepare_next():
+    isGap = False
+    done  = False
+    eigsRanges = [(min(eigsDict[guess][0]),max(eigsDict[guess][0]))\
+                  for guess in scipy.sort(eigsDict.keys())]
+    for ii in range(1,len(eigsRanges)):
+      if not geq_tol(eigsRanges[ii-1][1],eigsRanges[ii][0],tol):
+        guess = 0.5*(eigsRanges[ii-1][1]+eigsRanges[ii][0])
+        isGap = True
+    if not isGap:
+      if startVal < endVal:
+        done  = eigsRanges[-1][1] > endVal or guess > endVal
+        guess = min(endVal,max(guess,eigsRanges[-1][1])+\
+          (eigsRanges[-1][1]-eigsRanges[-1][0])/(k-1)*(k/2.-guessOffset))
+      else:
+        done  = eigsRanges[ 0][0] < endVal or guess < endVal
+        guess = max(endVal,min(guess,eigsRanges[ 0][0])-\
+          (eigsRanges[ 0][1]-eigsRanges[ 0][0])/(k-1)*(k/2.-guessOffset))
+    if guess in eigsDict.keys():
+      done = True
+    return guess,done,isGap
+  
+  t0    = time.time()
+  itr   = 0
+  done  = False
+  guess = startVal
+  stats = {'eigsTime':0,'gapCount':0}
+  eigsDict = {}
   while not done and itr < maxitr:
     itr = itr+1
-    wNew,vNew = eigs_sorted(factor*mat,k,guess,forcePairs)
-    w,v,isGap = merge(w,v,wNew,vNew,overlap,tol)
-    if isGap:
-      guess = 0.5*wNew[-1]
-    else:
-      space = scipy.mean(w[1:]-w[:-1])
-      guess = w[-1]+space*(k/2-offset)
-      done = max(w) > eigRange[-1]
-  ind = (w <= eigRange[1])*(w >= eigRange[0])
-  ind[0] = True
-  if not isReverse:
-    return  w[ind],v[:,ind]
-  else:
-    return -w[ind],v[:,ind]
+    w,v,eigsTime        = eigs_sorted(mat,sigma=guess,k=k,isTime=True)
+    eigsDict[guess]     = (w,v)
+    guess,done,isGap    = prepare_next()
+    stats['eigsTime']  += eigsTime
+    stats['gapCount']  += int(isGap) 
+  
+  if not done:
+    raise ValueError, 'Maximum number of iterations exceeded!'
+  w,v = merge_eigs(eigsDict)
+  ind = (w <= max([startVal,endVal]))*(w >= min([startVal,endVal]))
+  stats['numEigs']   = scipy.sum(ind)
+  stats['eigsCalls'] = itr
+  stats['totalTime'] = time.time()-t0
+  return (w[ind],v[:,ind],stats) if isGetStats else (w[ind],v[:,ind])
+
+def eigs_num(mat,startVal,direction,numEigs,k=24,tol=1e-6,guessOffset=2,maxitr=100,isGetStats=False):
+  ''' Find all the eigenvalues of mat between startVal and endVal. This is done
+      with multiple calls to scipy.sparse.linalg.eigs, finding k eigenvalues at
+      a time. At most maxitr calls are made; if this number is reached without
+      finding all eigenvalues, an error is raised.
+  '''
+  def prepare_next():
+    isGap = False
+    eigsRanges = [(min(eigsDict[guess][0]),max(eigsDict[guess][0]))\
+                  for guess in scipy.sort(eigsDict.keys())]
+    for ii in range(1,len(eigsRanges)):
+      if not geq_tol(eigsRanges[ii-1][1],eigsRanges[ii][0],tol):
+        guess = 0.5*(eigsRanges[ii-1][1]+eigsRanges[ii][0])
+        isGap = True
+    if not isGap:
+      if direction > 0:
+        guess = max(guess,eigsRanges[-1][1])+\
+          (eigsRanges[-1][1]-eigsRanges[-1][0])/(k-1)*(k/2.-guessOffset)
+      else:
+        guess = min(guess,eigsRanges[ 0][0])-\
+          (eigsRanges[ 0][1]-eigsRanges[ 0][0])/(k-1)*(k/2.-guessOffset)
+    if guess in eigsDict.keys():
+      done = True
+    return guess,isGap
+  
+  t0    = time.time()
+  itr   = 0
+  done  = False
+  guess = startVal
+  stats = {'eigsTime':0,'gapCount':0}
+  eigsDict = {}
+  while not done and itr < maxitr:
+    itr = itr+1
+    wNew,vNew,eigsTime = eigs_sorted(mat,sigma=guess,k=k,isTime=True)
+    eigsDict[guess]    = (wNew,vNew)
+    guess,isGap        = prepare_next()
+    if not isGap:
+      w,v = merge_eigs(eigsDict)
+      eigsDict = {max(eigsDict.keys()) if direction > 0 else min(eigsDict.keys()):(w,v)}
+      done = len(w) > numEigs
+    stats['eigsTime'] += eigsTime
+    stats['gapCount'] += int(isGap) 
+  
+  if not done:
+    raise ValueError, 'Maximum number of iterations exceeded!'
+  ind = scipy.arange(0,numEigs) if direction > 0 else scipy.arange(len(w)-numEigs,len(w))
+  stats['numEigs']   = len(ind)
+  stats['eigsCalls'] = itr
+  stats['totalTime'] = time.time()-t0
+  return (w[ind],v[:,ind],stats) if isGetStats else (w[ind],v[:,ind])
 
 class SparseMaker():
   ''' SparseMaker class facilitates creation of sparse matrices, either by

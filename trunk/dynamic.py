@@ -1,23 +1,16 @@
 ''' Module for Condition class, which is used to calculate dynamical variables,
     e.g. carrier concentration, which depend upon the electrical bias.
 '''
-import scipy, scipy.constants, calc, out
+from ledsim import *
+import calc, out
 
-pi       = scipy.pi
-q        = scipy.constants.elementary_charge
-eV       = scipy.constants.electron_volt
-m0       = scipy.constants.electron_mass
-kB       = scipy.constants.Boltzmann
-hbar     = scipy.constants.hbar
-epsilon0 = scipy.constants.epsilon_0
-
-class Condition(calc.Access):
+class Condition(Access):
   ''' Class for dynamically calculated attributes, i.e. those which depend
       upon the bias. Each condition has an associated structure, and attributes
       of the structure may be referenced directly as though they were
       attributes of the condition.
   '''     
-  def __init__(self,struct=None,phi=None,phiN=None,phiP=None):
+  def __init__(self,struct=None,phi=None,phiN=None,phiP=None,wavefunctions=None):
     ''' Initialize the condition; this requires the structure, the electrostatic
         potential phi, and the quasi-potentials phiN and phiP.
     '''
@@ -25,8 +18,15 @@ class Condition(calc.Access):
     self.phi    = phi
     self.phiN   = phiN
     self.phiP   = phiP
+    self.wavefunctions = wavefunctions
     self.attrSwitch = \
-      {'Lp'          : self.get_carriers_lr,
+      {'Efn'         : self.get_band_edges,
+       'Efp'         : self.get_band_edges,
+       'EcMax'       : self.get_band_edges,
+       'EcMin'       : self.get_band_edges,
+       'EvMax'       : self.get_band_edges,
+       'EvMin'       : self.get_band_edges,
+       'Lp'          : self.get_carriers_lr,
        'Ln'          : self.get_carriers_lr,
        'Rp'          : self.get_carriers_lr,
        'Rn'          : self.get_carriers_lr,
@@ -48,8 +48,6 @@ class Condition(calc.Access):
        'N'           : self.get_NP,
        'P'           : self.get_NP,
        'Q'           : self.get_NP,
-       'Efn'         : self.get_band_edges,
-       'Efp'         : self.get_band_edges,
        'nmid'        : self.get_np_mid,
        'pmid'        : self.get_np_mid,
        'muN'         : self.get_mobility,
@@ -123,7 +121,11 @@ class Condition(calc.Access):
         dphiN, and dphiP. This is useful in calculating derivatives and applying
         corrections, e.g. in a solver.
     '''
-    return Condition(self.struct,self.phi+dphi,self.phiN+dphiN,self.phiP+dphiP)
+    if keepWavefunctions:
+      return Condition(self.struct,self.phi+dphi,self.phiN+dphiN,self.phiP+dphiP,\
+                       self.wavefunctions)
+    else:
+      return Condition(self.struct,self.phi+dphi,self.phiN+dphiN,self.phiP+dphiP)
 
   def get_iv(self):
     ''' Get the voltage, total current density, electron and hole current density
@@ -146,8 +148,41 @@ class Condition(calc.Access):
   def get_band_edges(self):
     ''' Calculate the quasi-Fermi level positions.
     '''
-    self.Efn = q*(self.phiN-self.phi)
-    self.Efp = q*(self.phiP-self.phi)
+    def band_min(E):
+      return min(-q*scipy.minimum(self.phi[self.grid.qIndex][:-1],
+                    self.phi[self.grid.qIndex][ 1:])+E[self.grid.qrIndex])
+    def band_max(E):
+      return max(-q*scipy.maximum(self.phi[self.grid.qIndex][:-1],\
+                    self.phi[self.grid.qIndex][ 1:])+E[self.grid.qrIndex])
+    self.Efn   = q*(self.phiN-self.phi)
+    self.Efp   = q*(self.phiP-self.phi)
+    self.EcMax = band_max(self.Ec0)
+    self.EcMin = band_min(self.Ec0)
+    self.EvMax = band_max(self.Ev0[0,:])
+    self.EvMin = band_min(self.Ev0[0,:])
+
+  def get_carriers_quantum(self,phi,phiN,phiP):
+    ''' Calculate the carrier density at each gridpoint in the quantum region.
+    '''         
+    def fc(Ef,E):
+      return 1./(1+scipy.exp((E[:,scipy.newaxis]-Ef-q*(phiOrig-phi))/(kB*cond.modelOpts.T)))
+    def fv(Ef,E):
+      return 1.-fc(Ef,E)
+    
+    Efn = q*(phiN-phi)[self.grid.qIndex]
+    phiOrig = self.EcWavefunctions.phiOrig
+    n = scipy.zeros(len(self.grid.qIndex))
+    for kpt in self.EcWavefunctions.psiDict.values():
+      n += scipy.sum(kpt['psisq']*kpt['Vk']*scipy.transpose(fc(Efn,kpt['E'])),1)
+    n = n/(4*pi**2)*self.EcWavefunctions.degen
+    
+    Efp = q*(phiP-phi)[self.grid.qIndex]
+    phiOrig = self.EvWavefunctions.phiOrig
+    p = scipy.zeros(len(self.grid.qIndex))
+    for kpt in self.EvWavefunctions.psiDict.values():
+      p += scipy.sum(kpt['psisq']*kpt['Vk']*scipy.transpose(fv(Efp,kpt['E'])),1)
+    p = p/(4*pi**2)*self.EvWavefunctions.degen
+    return n, p
 
   def get_carriers(self,phi,phiN,phiP):
     ''' Get the carriers in each region (i.e. between gridpoints) given the

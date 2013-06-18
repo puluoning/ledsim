@@ -23,7 +23,10 @@ class AlGaInN():
         attrSwitch: dictionary which specifies how attributes of the material
           are calculated, e.g. strained bandgap, lattice constants,
           polarization, etc.
+        overrideAttrsMethod: material attributes calculated by this method may
+          be overridden using the overrideAttrs input argument to __init__.
   '''
+  
   def __init__(self,layerAttrs={},subAttrs={},overrideAttrs={}):
     ''' Initialize the material class, modifying layerAttrs and subAttrs as
         specified by the user. overrideAttrs specifies how basic parameters
@@ -39,8 +42,8 @@ class AlGaInN():
     self.layerAttrs = \
       {'x'          : {'defaultValue':0.      ,'diffusionLength':2e-10},
        'y'          : {'defaultValue':0.      ,'diffusionLength':2e-10},
-       'Na'         : {'defaultValue':0.      ,'diffusionLength':2e-9 },
-       'Nd'         : {'defaultValue':0.      ,'diffusionLength':2e-9 },
+       'Na'         : {'defaultValue':0.      ,'diffusionLength':8e-10},
+       'Nd'         : {'defaultValue':0.      ,'diffusionLength':8e-10},
        'relaxation' : {'defaultValue':0.      ,'diffusionLength':2e-10},
        'Ndef'       : {'defaultValue':1e17*1e6,'diffusionLength':2e-10}}
     
@@ -48,8 +51,10 @@ class AlGaInN():
     # phi : 
     # theta :
     self.subAttrs = \
-      {'phi'        : {'defaultValue':0.      },
-       'theta'      : {'defaultValue':0.      }}
+      {'phi'        : {'defaultValue':0.},
+       'theta'      : {'defaultValue':0.}}
+    
+    self.overrideAttrsMethod = self.get_basic_params
     
     # Dictionary that specifies how additional material parameters are
     # calculated.
@@ -122,7 +127,6 @@ class AlGaInN():
     # Apply override attributes. Note: only the attrs set by the method given
     # by overrideAttrsMethod can be overridden. This method accepts only
     # the structure as input, not the substrate.
-    self.overrideAttrsMethod = self.get_basic_params
     self.overrideAttrs = {}
     for attr, method in overrideAttrs.items():
       if attr in self.attrSwitch.keys() and \
@@ -248,7 +252,73 @@ class AlGaInN():
     '''
     s.Ppz = -4*s.d13*(s.alc0-sub.alc0)/(s.alc0+sub.alc0)*(s.C11+s.C12-2*s.C13**2/s.C33)
     s.Ptot = (s.Ppz+s.Psp)*s.modelOpts.polarization
+  
+  def get_C_Hc1x1(s,kx,ky):
+    ''' Return the C matrices for the conduction band Hamiltonian for the given
+        kx and ky values. Also return the kpSize, degeneracy, and angular
+        periodicity in the kx/ky plane.
+    
+        C1 corresponds to type 1 terms (kz C1 kz)
+        C2 corresponds to type 2 terms (kz C2   )
+        C3 corresponds to type 3 terms (   C3 kz)
+        C4 corresponds to type 4 terms (   C4   )
+    '''
+    kpSize      = 1
+    degen       = 2
+    thetaPeriod = pi
+    C1 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+    C2 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+    C3 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+    C4 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+
+    C1[0,0,:] = hbar**2/(2*s.meperp)
+    C4[0,0,:] = s.Eref+s.Eg0+s.delcr+s.delso/3+hbar**2/(2*s.mepara)*(kx**2+ky**2)+ \
+                (s.a1+s.D1)*s.epszz+(s.a2+s.D2)*(s.epsxx+s.epsyy)
+    
+    return C1, C2, C3, C4, kpSize, degen, thetaPeriod
+
+  def get_C_Hv6x6(cond,kx,ky,boundaryType=0):
+    ''' Return the C matrices for the valence band Hamiltonian for the given
+        kx and ky values. Also return the kpSize, degeneracy, and angular
+        periodicity in the kx/ky plane.
         
+        C1 corresponds to type 1 terms (kz C1 kz)
+        C2 corresponds to type 2 terms (kz C2   )
+        C3 corresponds to type 3 terms (   C3 kz)
+        C4 corresponds to type 4 terms (   C4   )
+    '''
+    kpSize = 6
+    degen       = 1
+    thetaPeriod = pi
+    C1 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
+    C2 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
+    C3 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
+    C4 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
+  
+    C1[0,0,:] = hbar**2/(2*m0)*(cond.A1+cond.A3)
+    C1[1,1,:] = hbar**2/(2*m0)*(cond.A1+cond.A3)
+    C1[2,2,:] = hbar**2/(2*m0)*cond.A1
+    C2[0,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C2[1,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C2[2,0,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C2[2,1,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C3[0,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C3[1,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C3[2,0,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C3[2,1,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
+    C4[0,0,:] = cond.Eref+cond.delcr+cond.delso/3+hbar**2/(2*m0)*(cond.A2+cond.A4)*kt**2+ \
+                (cond.D1+cond.D3)*cond.epszz+(cond.D2+cond.D4)*2*cond.epsxx
+    C4[0,1,:] = hbar**2/(2*m0)*cond.A5*kt**2
+    C4[1,0,:] = hbar**2/(2*m0)*cond.A5*kt**2
+    C4[1,1,:] = cond.Eref+cond.delcr-cond.delso/3+hbar**2/(2*m0)*(cond.A2+cond.A4)*kt**2+ \
+                (cond.D1+cond.D3)*cond.epszz+(cond.D2+cond.D4)*2*cond.epsxx
+    C4[1,2,:] = scipy.sqrt(2)*cond.delso/3
+    C4[2,1,:] = scipy.sqrt(2)*cond.delso/3
+    C4[2,2,:] = cond.Eref+hbar**2/(2*m0)*cond.A2*kt**2+ \
+                cond.D1*cond.epszz+cond.D2*2*cond.epsxx
+
+    return C1, C2, C3, C4, kpSize, degen, thetaPeriod
+  
   def get_band_params(self,s,sub):
     ''' Calculate parameters related to the band structure.
     '''
@@ -259,20 +329,21 @@ class AlGaInN():
     # shifted to yield the conduction band/valence band offset ratio specified
     # in modelOpts for this Structure. 
     E0 = self.bulk_bands_calculator(s,sub,0.0,0.0,0.0)
-    s.Eref = -E0[1,:]
-    E0 = E0+s.Eref
-    s.Eg = E0[0,:]-E0[1,:]
+    offset = -E0[1,:]
+    E0 = E0+offset
+    s.Eg  = E0[0,:]-E0[1,:]
     s.Ec0 = E0[0 ,:]-(s.Eg-s.Eg[0])*(1-s.modelOpts.cBandOffset)
     s.Ev0 = E0[1:,:]-(s.Eg-s.Eg[0])*(1-s.modelOpts.cBandOffset)
+    s.Eref = s.Ev0[0,:]+offset
     
     # Calculate the energies of the conduction band and three valence bands at
     # various points in k-space. Then, calculate the carrier effective masses.
-    Exm = self.bulk_bands_calculator(s,sub,-dk,0.0,0.0)+s.Eref
-    Exp = self.bulk_bands_calculator(s,sub, dk,0.0,0.0)+s.Eref
-    Eym = self.bulk_bands_calculator(s,sub,0.0,-dk,0.0)+s.Eref
-    Eyp = self.bulk_bands_calculator(s,sub,0.0, dk,0.0)+s.Eref
-    Ezm = self.bulk_bands_calculator(s,sub,0.0,0.0,-dk)+s.Eref
-    Ezp = self.bulk_bands_calculator(s,sub,0.0,0.0, dk)+s.Eref
+    Exm = self.bulk_bands_calculator(s,sub,-dk,0.0,0.0)+offset
+    Exp = self.bulk_bands_calculator(s,sub, dk,0.0,0.0)+offset
+    Eym = self.bulk_bands_calculator(s,sub,0.0,-dk,0.0)+offset
+    Eyp = self.bulk_bands_calculator(s,sub,0.0, dk,0.0)+offset
+    Ezm = self.bulk_bands_calculator(s,sub,0.0,0.0,-dk)+offset
+    Ezp = self.bulk_bands_calculator(s,sub,0.0,0.0, dk)+offset
     mx  = hbar**2/((Exm-2*E0+Exp)/dk**2)
     my  = hbar**2/((Eym-2*E0+Eyp)/dk**2)
     mz  = hbar**2/((Ezm-2*E0+Ezp)/dk**2)
@@ -297,7 +368,7 @@ class AlGaInN():
         while a 1x1 Hamiltonian is used for the conduction band. The model is
         from the chapter by Vurgaftman and Meyer in the book by Piprek. 
     '''
-    E = scipy.zeros((4,len(s.Eg0)))
+    E = scipy.zeros((4,len(s.Eg0)))   
     E[0,:] = s.Eg0+s.delcr+s.delso/3+\
                 hbar**2/(2*s.mepara)*(kx**2+ky**2)+\
                 hbar**2/(2*s.meperp)*(kz**2)+\

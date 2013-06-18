@@ -1,16 +1,8 @@
 ''' Plotting methods.
 '''
-import scipy, scipy.constants, pylab
+from ledsim import *
 
-pi       = scipy.pi
-q        = scipy.constants.elementary_charge
-eV       = scipy.constants.electron_volt
-m0       = scipy.constants.electron_mass
-kB       = scipy.constants.Boltzmann
-hbar     = scipy.constants.hbar
-epsilon0 = scipy.constants.epsilon_0
-
-def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
+def ledplot(cond,plotType,isUseSmoothing=True,figNum=None,**kwargs):
   ''' Generate plots of type specified by the user given the condition.
       Optionally use smoothing (on by default). Supported plot types are:
         bands: band diagram, including conduction band, valence band, and the
@@ -36,6 +28,7 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
   # Select the figure if one is specified.
   if figNum is not None:
     pylab.figure(figNum)
+  pylab.clf()
   
   # Plot the appropriate plotType.
   if plotType == 'bands':
@@ -62,28 +55,42 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
       zp = cond.grid.z*1e9
       nPlot = interp_lr(cond.Ln,cond.Rn)*1e-6
       pPlot = interp_lr(cond.Lp,cond.Rp)*1e-6
+    else:
+      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
+      nPlot = interleave(cond.Ln,cond.Rn)[1:-1]*1e-6
+      pPlot = interleave(cond.Lp,cond.Rp)[1:-1]*1e-6
+
+    pylab.semilogy(zp,nPlot,'r',zp,pPlot,'b')
+    maxVal = max([max(nPlot),max(pPlot)])
+    pylab.xlim([0,zp[-1]])
+    pylab.ylim([1e10,10**scipy.ceil(scipy.log10(maxVal))])
+    pylab.ylabel('Density [1/cm3]')
+    pylab.xlabel('Position [nm]')
+    pylab.legend(['n','p'])
+    
+  elif plotType == 'doping':
+    if isUseSmoothing:
+      zp = cond.grid.z*1e9
       NdPlot = interp(cond.Nd)*1e-6
       NaPlot = interp(cond.Na)*1e-6
       NdIonizedPlot = interp_lr(cond.LNdIonized,cond.RNdIonized)*1e-6
       NaIonizedPlot = interp_lr(cond.LNaIonized,cond.RNaIonized)*1e-6
     else:
       zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
-      nPlot = interleave(cond.Ln,cond.Rn)[1:-1]*1e-6
-      pPlot = interleave(cond.Lp,cond.Rp)[1:-1]*1e-6
       NdPlot = calc.stretch(cond.Nd,2)*1e-6
       NaPlot = calc.stretch(cond.Na,2)*1e-6
       NdIonizedPlot = interleave(cond.LNdIonized,cond.RNdIonized)[1:-1]*1e-6
       NaIonizedPlot = interleave(cond.LNaIonized,cond.RNaIonized)[1:-1]*1e-6
 
-    pylab.semilogy(zp,nPlot,'r',zp,NdPlot,'r:',zp,NdIonizedPlot,'r--',\
-                   zp,pPlot,'b',zp,NaPlot,'b:',zp,NaIonizedPlot,'b--')
-    maxVal = max([max(nPlot),max(NdPlot),max(NdIonizedPlot),\
-                  max(pPlot),max(NaPlot),max(NaIonizedPlot)])
+    pylab.semilogy(zp,NdPlot,'r',zp,NdIonizedPlot,'r--',\
+                   zp,NaPlot,'b',zp,NaIonizedPlot,'b--')
+    maxVal = max([max(NdPlot),max(NdIonizedPlot),\
+                  max(NaPlot),max(NaIonizedPlot)])
     pylab.xlim([0,zp[-1]])
     pylab.ylim([1e10,10**scipy.ceil(scipy.log10(maxVal))])
     pylab.ylabel('Density [1/cm3]')
     pylab.xlabel('Position [nm]')
-    pylab.legend(['n','Nd','Nd+','p','Na','Na-'])
+    pylab.legend(['Nd','Nd+','Na','Na-'])
     
   elif plotType == 'recombination':
     if isUseSmoothing:
@@ -115,6 +122,76 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None):
     pylab.ylabel('Current density [A/cm2]')
     pylab.xlabel('Position [nm]')
     pylab.legend(['Jn','Jp'])
+  
+  elif plotType == 'EcWavefunctions':
+    if isUseSmoothing:
+      zp = cond.grid.z*1e9
+      EcPlot  = -cond.phi+interp(cond.Ec0)/eV
+    else:
+      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
+      EcPlot  = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ec0,2)/eV 
+    psiSpacing = kwargs['psiSpacing'] if 'psiSpacing' in kwargs else 0.025
+    threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-9
+    pylab.plot(zp,EcPlot,'k')
+    zp = cond.grid.z[cond.grid.qIndex]*1e9
+    for band in cond.wavefunctions.EcSubbands:
+      E,psisq = band.get_energy(0,0,isGetPsisq=True)
+      scaleFactor = psiSpacing/max(psisq)
+      ind = abs(psisq*scaleFactor) > threshold
+      pylab.plot(zp[ind],psisq[ind]*scaleFactor+E/eV,'g')
+    pylab.xlim([0,zp[-1]])
+    pylab.ylabel('Energy [eV]')
+    pylab.xlabel('Position [nm]')
+      
+  elif plotType == 'EvWavefunctions':
+    if isUseSmoothing:
+      zp = cond.grid.z*1e9
+      EvPlot  = -cond.phi+interp(cond.Ev0[0,:])/eV
+    else:
+      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9 
+      EvPlot  = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ev0[0,:],2)/eV
+    pylab.plot(zp,EvPlot,'k')
+    psiSpacing = kwargs['psiSpacing'] if 'psiSpacing' in kwargs else 0.025
+    threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-9
+    zp = cond.grid.z[cond.grid.qIndex]*1e9
+    for band in cond.wavefunctions.EvSubbands:
+      E,psisq = band.get_energy(0,0,isGetPsisq=True)
+      scaleFactor = -psiSpacing/max(psisq)
+      ind = abs(psisq*scaleFactor) > threshold
+      pylab.plot(zp[ind],psisq[ind]*scaleFactor+E/eV,'g')
+    pylab.xlim([0,zp[-1]])
+    pylab.ylabel('Energy [eV]')
+    pylab.xlabel('Position [nm]')
+    
+  elif plotType == 'EcSubbands':
+    kmax = kwargs['kmax'] if 'kmax' in kwargs.keys() else 1e9
+    dk   = cond.modelOpts.dkQuantumInterp
+    k1   = scipy.arange(0,kmax+dk,dk)
+    t1   = scipy.ones(len(k1))*0.
+    k2   = scipy.arange(0,kmax+dk,dk)
+    t2   = scipy.ones(len(k1))*cond.modelOpts.thetaPeriod/2
+    for band in cond.wavefunctions.EcSubbands:
+      E1 = band.get_energy(k1,t1)
+      E2 = band.get_energy(k2,t2)
+      pylab.plot( k1/1e9,E1/eV,'b')
+      pylab.plot(-k2/1e9,E2/eV,'r')
+    pylab.ylabel('Energy [eV]')
+    pylab.xlabel('|k|')
+
+  elif plotType == 'EvSubbands':
+    kmax = kwargs['kmax'] if 'kmax' in kwargs.keys() else 1e9
+    dk   = cond.modelOpts.dkQuantumInterp
+    k1   = scipy.arange(0,kmax+dk,dk)
+    t1   = scipy.ones(len(k1))*0.
+    k2   = scipy.arange(0,kmax+dk,dk)
+    t2   = scipy.ones(len(k1))*cond.modelOpts.thetaPeriod/2
+    for band in cond.wavefunctions.EvSubbands:
+      E1 = band.get_energy(k1,t1)
+      E2 = band.get_energy(k2,t2)
+      pylab.plot( k1/1e9,E1/eV,'b')
+      pylab.plot(-k2/1e9,E2/eV,'r')
+    pylab.ylabel('Energy [eV]')
+    pylab.xlabel('|k|')
   
   else:
     raise ValueError, 'Unknown plotType!'

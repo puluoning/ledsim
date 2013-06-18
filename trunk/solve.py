@@ -1,64 +1,7 @@
 '''
 '''
-import scipy, scipy.constants, scipy.sparse.linalg, dynamic, calc
-
-pi       = scipy.pi
-q        = scipy.constants.elementary_charge
-eV       = scipy.constants.electron_volt
-m0       = scipy.constants.electron_mass
-kB       = scipy.constants.Boltzmann
-hbar     = scipy.constants.hbar
-epsilon0 = scipy.constants.epsilon_0
-
-class SolverOpts(calc.GenericOpts,calc.Access):
-  ''' SolverOpts controls methods used in the solve module. SolverOpts has the
-      following attributes:
-        dphi : float
-          Increment used in numerical evaluation of derivatives with respect to
-          electrostatic potential phi and quasi-potentials phiN and phiP. Units
-          are volts; default value is 1e-9 V.
-        maxAllowedCorrection : float
-          Maximum allowed correction per solver iteration. Units are volts;
-          default value is 0.1 V.
-        convergenceThreshold : float
-          Solution is considered converged once the magnitude of the correction
-          is smaller than convergenceThreshold. Units are volts; default value
-          is 5e-8 V.
-        maxitr : int
-          Maximum number of solver iterations per solve attempt. Default value
-          is 100.
-        maxitrOuter : int
-          Maximum number of solve attempts for a bias point. Default is 20.
-        Jmin : float
-          Minimum current for use of current boundary condition. Units are Amps
-          per square meter; default value is 1e-2 A/m**2
-        dVmax : float
-          Maximum voltage step in voltage ramping. Units are volts; default
-          value is 0.5 V. 
-        verboseLevel : int 
-          Determines level of diagnostic output. Default value is 1.
-          1 : no output
-          2 : 1 + output in bias wrapper
-          3 : 2 + output per call to solver
-          4 : 3 + output per solver iteration
-  ''' 
-  validAttrs = ['dphi','maxAllowedCorrection','convergenceThreshold',
-                'maxitr','maxitrOuter','Jmin','dVmax','verboseLevel']
-  
-  def __init__(self,**kwargs):
-    ''' Construct the SolverOpts object. Keyword input arguments can be used to
-        override default values.
-    '''
-    self.dphi                 = 1e-9
-    self.maxAllowedCorrection = 0.1
-    self.convergenceThreshold = 5e-8
-    self.maxitr               = 100
-    self.maxitrOuter          = 20
-    self.Jmin                 = 1e-2
-    self.dVmax                = 0.5
-    self.verboseLevel         = 1
-    for attr, value in kwargs.items():
-      self.__setattr__(attr,value)
+from ledsim import *
+import calc, dynamic
 
 def out_printer(itr,err,solverOpts):
   '''
@@ -366,7 +309,10 @@ def bias(initialCond,solverOpts=SolverOpts(),Vtarget=None,Jtarget=None):
     else:
       return cond
 
-  cond = initialCond.offset(0,0,0)
+  if isinstance(initialCond,Structure):
+    cond = solve_equilibrium(solve_equilibrium_local(initialCond,solverOpts),solverOpts)
+  else:
+    cond = initialCond.offset(0,0,0)
   if Jtarget != None:
     if solverOpts.verboseLevel >= 2:
       print '>> Solving for bias condition: J='+str(Jtarget)+'A/m2'
