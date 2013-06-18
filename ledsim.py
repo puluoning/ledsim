@@ -1,8 +1,15 @@
 ''' Base module for LEDSIM.
 '''
-import scipy, pylab, calc, solve
+import scipy
+import scipy.constants
+import scipy.linalg
+import scipy.sparse
+import scipy.sparse.linalg
+import pylab
+import time
 
 pi       = scipy.pi
+c        = scipy.constants.c
 q        = scipy.constants.elementary_charge
 eV       = scipy.constants.electron_volt
 m0       = scipy.constants.electron_mass
@@ -10,7 +17,57 @@ kB       = scipy.constants.Boltzmann
 hbar     = scipy.constants.hbar
 epsilon0 = scipy.constants.epsilon_0
 
-class GridOpts(calc.GenericOpts,calc.Access):
+class Access():
+  ''' Access class provides attribute and index access to the object dictionary.
+  '''
+  def __setattr__(self,attr,value):
+    ''' Set the specified attribute to the given value. Note that __setattr__
+        directly accesses the object dictionary.
+    '''
+    self.__dict__[attr] = value
+  
+  def __setitem__(self,attr,value):
+    ''' Set the specified attribute to the given value. Note that __setitem__
+        merely calls __setattr__ instead of accessing the object dictionary.
+        For classes inheriting from Access, it is sufficient to overload
+        __setattr__ to change the behavior of both methods.
+    '''
+    self.__setattr__(attr,value)
+   
+  def __getitem__(self,attr):
+    ''' Get the specified attribute by accessing the object dictionary.
+    '''
+    return self.__dict__[attr]
+  
+  def attrs(self):
+    ''' Return the keys of the object dictionary.
+    '''
+    return self.__dict__.keys()
+
+class GenericOpts():
+  ''' GenericOpts implements standard methods for options objects, such as
+      GridOpts and SolverOpts. __setattr__ is overloaded to prevent setting
+      of attributes which are not valid for the class.
+  '''
+  def __setattr__(self,attr,value):
+    ''' Set the specified attribute to the given value, checking to make sure
+        that the attribute is valid/allowed.
+    '''
+    if attr not in self.validAttrs:
+      raise AttributeError, 'Opts error: %s is not a valid option' %(attr)
+    else:
+      self.__dict__[attr] = value
+  
+  def __str__(self):
+    ''' Print the attributes of this object 
+    '''
+    outStr = ''
+    attrWidthMax = max([len(attr) for attr in self.validAttrs]) 
+    for attr in self.validAttrs:
+      outStr += attr.ljust(attrWidthMax)+' : '+str(self.__dict__[attr])+'\n'
+    return outStr
+
+class GridOpts(GenericOpts,Access):
   ''' GridOpts object specifies how the grid is assembled for a given structure.
       Note: units are in meters. GridOpts has the following attributes:
         useFixedGrid : Boolean
@@ -26,15 +83,8 @@ class GridOpts(calc.GenericOpts,calc.Access):
           Default value is 0.04
         dzQuantum : float
           Gridpoint spacing thoughout the quantum layers. Default value is 2e-10
-        quantumPadLength : float
-          Distance beyond the quantum layer where wavefunctions are calculated.
-          Default value is 10e-9
-        quantumBlendLength : float
-          Length over which quantum carrier density is blended with classical.
-          Default value is 3e-9
   '''
-  validAttrs = ['useFixedGrid','dz','dzEdge','dzCenterFraction',
-                'dzQuantum','quantumPadLength','quantumBlendLength']
+  validAttrs = ['useFixedGrid','dz','dzEdge','dzCenterFraction','dzQuantum']
   
   def __init__(self,**kwargs):
     ''' Construct the GridOpts object. Keyword input arguments can be used to
@@ -45,12 +95,10 @@ class GridOpts(calc.GenericOpts,calc.Access):
     self.dzEdge             = 2e-10
     self.dzCenterFraction   = 0.040
     self.dzQuantum          = 2e-10
-    self.quantumPadLength   = 1e-8 
-    self.quantumBlendLength = 3e-9
     for attr, value in kwargs.items():
       self.__setattr__(attr,value)
 
-class ModelOpts(calc.GenericOpts,calc.Access):
+class ModelOpts(GenericOpts,Access):
   ''' ModelOpts controls models used in simulation. ModelOpts has the
       following attributes:
         T : float
@@ -68,14 +116,9 @@ class ModelOpts(calc.GenericOpts,calc.Access):
           determines whether radiative recombination is enabled
         auger : boolean
           determines whether Auger recombination is enabled
-        quantumDeltaE : float
-          Determines the energy beyond band extremum where wavefunctions are
-          calculated.
-        dkQuantum : float
-          dk value for quantum calculation of carrier density
   '''
   validAttrs = ['T','dkBulk','cBandOffset','polarization','defect',
-                'radiative','auger','quantumDeltaE','dkQuantum']
+                'radiative','auger']
   
   def __init__(self,**kwargs):
     ''' Construct the ModelOpts object. Keyword input arguments can be used to
@@ -88,12 +131,92 @@ class ModelOpts(calc.GenericOpts,calc.Access):
     self.defect               = True
     self.radiative            = True
     self.auger                = True
-    self.quantumDeltaE        = 0.1*eV
-    self.dkQuantum            = 3e7
     for attr, value in kwargs.items():
       self.__setattr__(self,attr,value)
 
-class Grid(calc.Access):
+class SolverOpts(GenericOpts,Access):
+  ''' SolverOpts controls methods used in the solve module. SolverOpts has the
+      following attributes:
+        dphi : float
+          Increment used in numerical evaluation of derivatives with respect to
+          electrostatic potential phi and quasi-potentials phiN and phiP. Units
+          are volts; default value is 1e-9 V.
+        maxAllowedCorrection : float
+          Maximum allowed correction per solver iteration. Units are volts;
+          default value is 0.1 V.
+        convergenceThreshold : float
+          Solution is considered converged once the magnitude of the correction
+          is smaller than convergenceThreshold. Units are volts; default value
+          is 5e-8 V.
+        maxitr : int
+          Maximum number of solver iterations per solve attempt. Default value
+          is 100.
+        maxitrOuter : int
+          Maximum number of solve attempts for a bias point. Default is 20.
+        Jmin : float
+          Minimum current for use of current boundary condition. Units are Amps
+          per square meter; default value is 1e-2 A/m**2
+        dVmax : float
+          Maximum voltage step in voltage ramping. Units are volts; default
+          value is 0.5 V. 
+        verboseLevel : int 
+          Determines level of diagnostic output. Default value is 1.
+          1 : no output
+          2 : 1 + output in bias wrapper
+          3 : 2 + output per call to solver
+          4 : 3 + output per solver iteration
+  ''' 
+  validAttrs = ['dphi','maxAllowedCorrection','convergenceThreshold',
+                'maxitr','maxitrOuter','Jmin','dVmax','verboseLevel']
+  
+  def __init__(self,**kwargs):
+    ''' Construct the SolverOpts object. Keyword input arguments can be used to
+        override default values.
+    '''
+    self.dphi                 = 1e-9
+    self.maxAllowedCorrection = 0.1
+    self.convergenceThreshold = 5e-8
+    self.maxitr               = 100
+    self.maxitrOuter          = 20
+    self.Jmin                 = 1e-2
+    self.dVmax                = 0.5
+    self.verboseLevel         = 1
+    for attr, value in kwargs.items():
+      self.__setattr__(attr,value)
+
+class QuantumOpts(GenericOpts,Access):
+  ''' QuantumOpts controls parameters used in quantum aspects simulation.
+      QuantumOpts has the following attributes:
+        padLength : float
+          Distance beyond the quantum layer where wavefunctions are calculated.
+          Default value is 10e-9
+        blendLength : float
+          Length over which quantum carrier density is blended with classical.
+          Default value is 3e-9
+        deltaE : float
+          Determines the energy beyond band extremum where wavefunctions are
+          calculated.
+        dk : float
+          spacing for calculation of carrier subbands (magnitude of k)
+        thetaRes : int
+          Number of angular points at given k where wavefunctions are calculated.
+  '''
+  validAttrs = ['deltaE','deltaEk','dk','thetaRes','padLength','blendLength']
+  
+  def __init__(self,**kwargs):
+    ''' Construct the QuantumOpts object. Keyword input arguments can be used to
+        override default values.
+    '''   
+    self.deltaE               = 0.10*eV
+    self.deltaEk              = 0.25*eV
+    self.dk                   = 2e8
+    self.thetaRes             = 1
+    self.padLength            = 1e-8 
+    self.blendLength          = 3e-9
+    for attr, value in kwargs.items():
+      self.__setattr__(self,attr,value)
+
+class Grid(Access):
   ''' Grid object contains the grid information for a structure. The object has
       the following attributes:
         dz : scipy.array
@@ -111,10 +234,14 @@ class Grid(calc.Access):
     ''' Initialize the grid using the given layers and grid options.
     '''
     segments = []
+    qStart   =  scipy.inf
+    qEnd     = -scipy.inf
     for layer in layers:
       if layer.isQuantum:
         d1 = dn = gridOpts.dzQuantum
         segments += [self.get_dz_segment(d1,dn,layer.thickness)]
+        qStart = min(qStart,sum([len(seg) for seg in segments[:-1]]))
+        qEnd   = max(qEnd,  sum([len(seg) for seg in segments]))
       elif gridOpts.useFixedGrid:
         d1 = dn = gridOpts.dz
         segments += [self.get_dz_segment(d1,dn,layer.thickness)]
@@ -131,7 +258,9 @@ class Grid(calc.Access):
     self.zr       = (self.z[:-1]+self.z[1:])/2
     self.znum     = len(self.z)
     self.rnum     = len(self.zr)
-    self.gridOpts = gridOpts     
+    self.gridOpts = gridOpts
+#    self.qIndex   = scipy.arange(qStart+1,qEnd+2)
+#    self.qrIndex  = scipy.arange(qStart+1,qEnd+1)
 
   def get_dz_segment(self,d1,dn,L):
     ''' Calculate the vector of gridpoint spacing given a segment of length L
@@ -156,8 +285,17 @@ class Grid(calc.Access):
         delvec = scipy.flipud(delvec)
     remvec = 1-abs(scipy.linspace(-1,1,len(delvec)))
     return delvec+rem*remvec/sum(remvec)
+  
+  def get_index(self,zmin,zmax):
+    ''' Find the starting and stopping indices of regions within the bounds
+        specified by zmin and zmax.
+    '''
+    match = ((zmin < self.zr)*(self.zr < zmax)).tolist()
+    startIndex = match.index(True)
+    stopIndex  = len(match)-match[::-1].index(True)
+    return startIndex,stopIndex
 
-class Structure(calc.Access):
+class Structure(Access):
   ''' Structure class gives all the parameters of the structure which are
       bias-independent.
   '''
@@ -200,7 +338,7 @@ class Structure(calc.Access):
     '''
     return self.material.attrSwitch.keys()
 
-class Layer(calc.Access):
+class Layer(Access):
   ''' Layer object. The Layer object works in conjunction with the build
       method to form a simple way to generate structures. A layer has a
       material type, thickness, and an isQuantum flag, which determines  
@@ -228,22 +366,28 @@ class Layer(calc.Access):
       else:
         raise AttributeError, '%s is not a valid attribute for %s' %(attr,material)
 
-def get_index(zmin,zmax,grid):
-  ''' Find the starting and stopping indices of regions within the bounds
-      specified by zmin and zmax.
-  '''
-  match = ((zmin < grid.zr)*(grid.zr < zmax)).tolist()
-  startIndex = match.index(True)
-  stopIndex  = len(match)-match[::-1].index(True)
-  return startIndex,stopIndex
-
-def build(layers,substrate=None,gridOpts=GridOpts(),\
-          modelOpts=ModelOpts(),solverOpts=solve.SolverOpts()):
+def build(layers,substrate=None,gridOpts=GridOpts(),modelOpts=ModelOpts()):
   ''' Build takes a list of layers and creates a structure; the equilibrium
       condition is calculated and returned. Optionally, the substrate can
       be specified, and grid options and model options can be supplied. Also,
       solverOpts used in calculation of equilibrium condition can be provided.
   '''
+  def diffuse(a,dz,Ld,f=0.2):
+    b = scipy.copy(a)
+    if Ld != 0:
+      T = 1.
+      D = Ld**2/(4*T)
+      rnum   = len(dz)
+      dtmax  = 0.25/max(D/dz**2)
+      nsteps = scipy.ceil(rnum*f)
+      dt     = T/nsteps;
+      ind1   = range(1,rnum)+[rnum-1]
+      ind2   = [0]+range(0,rnum-1)
+      for ii in scipy.arange(0,nsteps):
+        b[1:-1] = (b+dt/(dz*(dz+dz[ind1]))*2*D*(b[ind1]-b)+ \
+                     dt/(dz*(dz+dz[ind2]))*2*D*(b[ind2]-b))[1:-1]
+    return b
+    
   if substrate == None:
     substrate = layers[0]  
   if [layer.material == substrate.material for layer in layers] != [True]*len(layers):
@@ -260,12 +404,10 @@ def build(layers,substrate=None,gridOpts=GridOpts(),\
     zmin = 0.
     for layer in layers:
       zmax = zmin+layer.thickness
-      startIndex,stopIndex = get_index(zmin,zmax,s.grid)
+      startIndex,stopIndex = s.grid.get_index(zmin,zmax)
       vec[startIndex:stopIndex] = layer[attr]
       zmin = zmax
     Ld = mat.layerAttrs[attr]['diffusionLength']
-    s[attr] = calc.diffuse(vec,s.grid.dz,Ld)
+    s[attr] = diffuse(vec,s.grid.dz,Ld)
     sub[attr] = substrate[attr]
-  c1 = solve.solve_equilibrium_local(s,solverOpts=solverOpts)
-  c2 = solve.solve_equilibrium(c1,solverOpts=solverOpts)
-  return c2
+  return s
