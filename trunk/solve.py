@@ -6,7 +6,7 @@ import calc, dynamic
 def out_printer(itr,err,solverOpts):
   '''
   '''
-  if solverOpts.verboseLevel >= 4:
+  if solverOpts.verboseLevel >= 5:
     print '    Iteration '+str(itr)+'; Error = '+('+' if err > 0 else '')+str(err)
 
 def solve_equilibrium_local(struct,solverOpts=SolverOpts()):
@@ -19,6 +19,8 @@ def solve_equilibrium_local(struct,solverOpts=SolverOpts()):
   # quasi-Fermi levels yielding charge neutrality. This is done using the 
   # effective donor and acceptor dopant concentrations (taking into account
   # compensation doping) and Boltzmann statistics.
+  isQuantum = struct.modelOpts.quantum
+  struct.modelOpts.quantum = False
   kBT = kB*struct.modelOpts.T
   effectiveNd = scipy.maximum(scipy.ones(struct.grid.rnum),struct.Nd-struct.Na)
   effectiveNa = scipy.maximum(scipy.ones(struct.grid.rnum),struct.Na-struct.Nd)
@@ -59,11 +61,13 @@ def solve_equilibrium_local(struct,solverOpts=SolverOpts()):
     cond.err = err
     cond.itr = itr
     cond.converged = True
+    cond.quantumConverged = False
+    struct.modelOpts.quantum = isQuantum
     return cond
   else:
     raise ValueError, 'solve.solve_equilibrium failed to converge!'
-
-def solve_equilibrium(initialCond,solverOpts=SolverOpts()):
+    
+def solve_poisson_single(initialCond,solverOpts):
   ''' Solves the Poisson equation, i.e. the condition of zero applied bias. The
       input is an initial dynamic.Condition which represents the guess at the
       solution. Solver options may be specified via solverOpts. 
@@ -85,10 +89,9 @@ def solve_equilibrium(initialCond,solverOpts=SolverOpts()):
     sm.add_diag( 1,0,-cond.epsilon[1:-1]/cond.grid.dz[1:-1])
     mat = sm.assemble()
     return mat, res
-  
-  if solverOpts.verboseLevel >= 3:
-    print '>> running solve.solve_equilibrium;'
+
   cond = initialCond.offset(0,0,0)
+  cond.get_carriers_lr()
   itr = 0
   diverged = False
   converged = False
@@ -111,11 +114,129 @@ def solve_equilibrium(initialCond,solverOpts=SolverOpts()):
     cond.err = err
     cond.itr = itr
     cond.converged = True
+    cond.quantumConverged = False
     return cond
   else:
     raise ValueError, 'Solver failed to converge!'
+
+def solve_poisson_periodic_single(initialCond,solverOpts=SolverOpts(),
+                      Ntarget=None,Ptarget=None,Rtarget=None):
+  ''' Equilibrium solver which enforces periodic boundary conditions and zero
+      total charge within the structure that is simulated. This is appropriate
+      for the modeling of quantum wells. Electron sheet density, hole sheet
+      density, and total recombination rate targets are supported. Note:
+      Ntarget, Ptarget, and Rtarget are in units of 1/m2.
+  '''
+  def get_jacobian(cond,solverOpts,Ntarget,Ptarget,Rtarget):
+    '''
+    '''
+    condPhi = cond.offset(solverOpts.dphi,solverOpts.dphi,solverOpts.dphi) 
+    drho2D_dphi = 1/solverOpts.dphi*(condPhi.rho2D-cond.rho2D)
+    res = -cond.epsilon[:-1]/cond.grid.dz[:-1]*(cond.phi[1:-1]-cond.phi[ :-2])+ \
+           cond.epsilon[ 1:]/cond.grid.dz[ 1:]*(cond.phi[2:  ]-cond.phi[1:-1])- \
+           cond.Ptot[1:]+cond.Ptot[:-1]+cond.rho2D[1:-1]
+    nzmax = 7*(cond.grid.znum-2)+2
+    sm = calc.SparseMaker(nzmax)
+    sm.add_diag(-1,0,-cond.epsilon[1:-1]/cond.grid.dz[1:-1])
+    sm.add_diag( 0,0, cond.epsilon[:-1]/cond.grid.dz[:-1]+ \
+                      cond.epsilon[1: ]/cond.grid.dz[1: ]- \
+                      drho2D_dphi[1:-1])
+    sm.add_diag( 1,0,-cond.epsilon[1:-1]/cond.grid.dz[1:-1])
+    if Ntarget == None and Ptarget == None and Rtarget == None:
+      res = scipy.concatenate((res,scipy.array([cond.Q])))
+      condPhiNP     = cond.offset(0,solverOpts.dphi,solverOpts.dphi)
+      drho2D_dphiNP = 1/solverOpts.dphi*(-cond.rho2D+condPhiNP.rho2D) 
+      dQ_dphiNP     = 1/solverOpts.dphi*(-cond.Q+condPhiNP.Q)
+      r = scipy.concatenate((scipy.arange(0,cond.grid.znum-2),
+                             scipy.ones(cond.grid.znum-1)*(cond.grid.znum-2)))
+      c = scipy.concatenate((scipy.ones(cond.grid.znum-2)*(cond.grid.znum-2),
+                             scipy.arange(0,cond.grid.znum-1)))
+      v = scipy.concatenate((-drho2D_dphiNP[1:-1],-drho2D_dphi[1:-1],
+                             scipy.array([-dQ_dphiNP])))
+    else:
+      condPhiN      = cond.offset(0,solverOpts.dphi,0)
+      condPhiP      = cond.offset(0,0,solverOpts.dphi)
+      drho2D_dphiN  = 1/solverOpts.dphi*(-cond.rho2D+condPhiN.rho2D)
+      drho2D_dphiP  = 1/solverOpts.dphi*(-cond.rho2D+condPhiP.rho2D)
+      dQ_dphiN      = 1/solverOpts.dphi*(-cond.Q+condPhiN.Q)
+      dQ_dphiP      = 1/solverOpts.dphi*(-cond.Q+condPhiP.Q)
+      r = scipy.concatenate((scipy.arange(0,cond.grid.znum-2),
+                             scipy.arange(0,cond.grid.znum-2),
+                             scipy.ones(cond.grid.znum)*(cond.grid.znum-2),
+                             scipy.ones(cond.grid.znum)*(cond.grid.znum-1)))
+      c = scipy.concatenate((scipy.ones(cond.grid.znum-2)*(cond.grid.znum-2),
+                             scipy.ones(cond.grid.znum-2)*(cond.grid.znum-1),
+                             scipy.arange(0,cond.grid.znum),
+                             scipy.arange(0,cond.grid.znum)))
+      if Ntarget != None:
+        res = scipy.concatenate((res,scipy.array([cond.Q,cond.N-Ntarget])))
+        dN_dphiN      = 1/solverOpts.dphi*(-cond.N+condPhiN.N)
+        dN_dphiP      = 1/solverOpts.dphi*(-cond.N+condPhiP.N)
+        dn2D_dphi     = 1/solverOpts.dphi*(-cond.n2D+condPhi.n2D)
+        dn2D_dphiN    = 1/solverOpts.dphi*(-cond.n2D+condPhiN.n2D)
+        dn2D_dphiP    = 1/solverOpts.dphi*(-cond.n2D+condPhiP.n2D)
+        v = scipy.concatenate((-drho2D_dphiN[1:-1],-drho2D_dphiP[1:-1],
+                               -drho2D_dphi[1:-1],scipy.array([-dQ_dphiN,-dQ_dphiP]),
+                               -dn2D_dphi[1:-1],scipy.array([-dN_dphiN,-dN_dphiP])))
+      elif Ptarget != None:
+        res = scipy.concatenate((res,scipy.array([cond.Q,cond.P-Ptarget])))
+        dP_dphiN      = 1/solverOpts.dphi*(-cond.P+condPhiN.P)
+        dP_dphiP      = 1/solverOpts.dphi*(-cond.P+condPhiP.P)
+        dp2D_dphi     = 1/solverOpts.dphi*(-cond.p2D+condPhi.p2D)
+        dp2D_dphiN    = 1/solverOpts.dphi*(-cond.p2D+condPhiN.p2D)
+        dp2D_dphiP    = 1/solverOpts.dphi*(-cond.p2D+condPhiP.p2D)
+        v = scipy.concatenate((-drho2D_dphiN[1:-1],-drho2D_dphiP[1:-1],
+                               -drho2D_dphi[1:-1],scipy.array([-dQ_dphiN,-dQ_dphiP]),
+                               -dp2D_dphi[1:-1],scipy.array([-dP_dphiN,-dP_dphiP])))
+      elif Rtarget != None:
+        res = scipy.concatenate((res,scipy.array([cond.Q,cond.Rtot-Rtarget])))
+        dRtot_dphiN   = 1/solverOpts.dphi*(-cond.Rtot+condPhiN.Rtot)
+        dRtot_dphiP   = 1/solverOpts.dphi*(-cond.Rtot+condPhiP.Rtot)
+        dRtot2D_dphi  = 1/solverOpts.dphi*(-cond.Rtot2D+condPhi.Rtot2D)
+        dRtot2D_dphiN = 1/solverOpts.dphi*(-cond.Rtot2D+condPhiN.Rtot2D)
+        dRtot2D_dphiP = 1/solverOpts.dphi*(-cond.Rtot2D+condPhiP.Rtot2D)
+        v = scipy.concatenate((-drho2D_dphiN[1:-1],-drho2D_dphiP[1:-1],
+                               -drho2D_dphi[1:-1],scipy.array([-dQ_dphiN,-dQ_dphiP]),
+                               -dRtot2D_dphi[1:-1],scipy.array([-dRtot_dphiN,-dRtot_dphiP])))
+    sm.add_elem(r,c,v)
+    mat = sm.assemble()
+    return mat, res
   
-def solve_nonequilibrium(initialCond,solverOpts=SolverOpts(),Jtarget=None):
+  cond = initialCond.offset(0,0,0)
+  cond.get_carriers_lr()
+  itr = 0
+  diverged = False
+  converged = False
+  while not converged and not diverged and itr < solverOpts.maxitr:
+    itr = itr+1
+    mat,res    = get_jacobian(cond,solverOpts,Ntarget,Ptarget,Rtarget)
+    correction = scipy.sparse.linalg.spsolve(mat,res)
+    errLoc     = scipy.argmax(abs(correction))
+    err        = abs(correction[errLoc])
+    signedErr  = correction[errLoc]
+    converged  = err < solverOpts.convergenceThreshold
+    diverged   = scipy.sum(scipy.isnan(correction)) > 0
+    if err > solverOpts.maxAllowedCorrection:
+      correction = correction/err*solverOpts.maxAllowedCorrection
+    correctionPhi  = scipy.concatenate((scipy.zeros(1),correction[:cond.grid.znum-2],scipy.zeros(1)))
+    if Ntarget == None and Ptarget == None and Rtarget == None:
+      correctionPhiN = correctionPhi+correction[cond.grid.znum-2]
+      correctionPhiP = correctionPhi+correction[cond.grid.znum-2]
+    else:
+      correctionPhiN = correctionPhi+correction[cond.grid.znum-2]
+      correctionPhiP = correctionPhi+correction[cond.grid.znum-1]
+    cond = cond.offset(correctionPhi,correctionPhiN,correctionPhiP)
+    out_printer(itr,signedErr,solverOpts)
+  if converged:
+    cond.err = err
+    cond.itr = itr
+    cond.converged = True
+    cond.quantumConverged = False
+    return cond
+  else:
+    raise ValueError, 'Solver failed to converge!'
+    
+def solve_nonequilibrium_single(initialCond,solverOpts=SolverOpts(),Jtarget=None):
   ''' Solves the drift-diffusion system, i.e. the Poisson equation together with
       continuity equations for electrons and holes. A target current density may
       be specified using Jtarget (units are A/m2). If no current is specified, 
@@ -242,10 +363,11 @@ def solve_nonequilibrium(initialCond,solverOpts=SolverOpts(),Jtarget=None):
   
   if solverOpts.verboseLevel >= 3:
     if Jtarget != None:
-      print '>> running solve.solve_nonequilibrium; Jtarget='+str(Jtarget)+'A/m2'
+      print '>> running solve.solve_nonequilibrium_single; Jtarget='+str(Jtarget)+'A/m2'
     else:
-      print '>> running solve.solve_nonequilibrium; Vtarget='+str(initialCond.V)
+      print '>> running solve.solve_nonequilibrium_single; Vtarget='+str(initialCond.V)
   cond = initialCond.offset(0,0,0)
+  cond.get_carriers_lr()
   itr = 0
   snum = cond.grid.znum-2
   diverged = False
@@ -272,9 +394,85 @@ def solve_nonequilibrium(initialCond,solverOpts=SolverOpts(),Jtarget=None):
     cond.err = err
     cond.itr = itr
     cond.converged = True
+    cond.quantumConverged = False
     return cond
   else:
     raise ValueError, 'Solver failed to converge!'
+ 
+def solve_poisson(initialCond,solverOpts=SolverOpts()):
+  ''' Solve the basic Poisson equation. For the classical case, this simply 
+      calls the method solve_poisson_periodic_single, while for the quantum 
+      case the outer loop of the solution is handled.
+  '''
+  if solverOpts.verboseLevel >= 3:
+    print '>> running solve.solve_poisson;'
+  if not initialCond.modelOpts.quantum:
+    return solve_poisson_single(initialCond,solverOpts)
+  else:
+    if not initialCond.quantumConverged:
+      if solverOpts.verboseLevel >= 4:
+        print ' > solving for classical initial condition;'
+      initialCond.modelOpts.quantum = False
+      initialCond = solve_poisson_periodic_single(initialCond,solverOpts)
+      initialCond.modelOpts.quantum = True
+    itr = 0
+    converged = False
+    solverOpts.maxitrOuter = 3
+    while not converged and itr < solverOpts.maxitrOuter:
+      itr += 1
+      cond = solve_poisson_single(initialCond,solverOpts)
+      error = max(max(abs(cond.EcWavefunctions.phiOrig-cond.phi)),max(abs(cond.EvWavefunctions.phiOrig-cond.phi)))
+      if solverOpts.verboseLevel >= 4:
+        print ' > Outer iteration %i; Error ='%itr,error
+      converged = error < solverOpts.quantumConvergenceThreshold
+      if not converged:
+        initialCond = cond.offset(0,0,0,keepWavefunctions=False)
+    if converged:
+      cond.quantumConverged = True
+      return cond
+    else:
+      raise ValueError, 'Solver failed to converge!'
+  
+def solve_poisson_periodic(initialCond,solverOpts=SolverOpts(),Ntarget=None,Ptarget=None,Rtarget=None):
+  ''' Solve the Poisson equation with periodic boundary conditions and
+      specified targets for either electron or hole sheet density, or sheet
+      recombination rate. For the classical case, this simply calls the method
+      solve_poisson_periodic_single, while for the quantum case the outer loop
+      of the solution is handled.
+  '''
+  if solverOpts.verboseLevel >= 3:
+    print '>> running solve.solve_poisson_periodic;'
+  if not initialCond.modelOpts.quantum:
+    return solve_poisson_periodic_single(initialCond,solverOpts,Ntarget,Ptarget,Rtarget)
+  else:
+    if not initialCond.quantumConverged:
+      if solverOpts.verboseLevel >= 4:
+        print ' > solving for classical initial condition;'
+      initialCond.modelOpts.quantum = False
+      initialCond = solve_poisson_periodic_single(initialCond,solverOpts,Ntarget,Ptarget,Rtarget)
+      initialCond.modelOpts.quantum = True
+    itr = 0
+    converged = False
+    solverOpts.maxitrOuter = 3
+    while not converged and itr < solverOpts.maxitrOuter:
+      itr += 1
+      cond = solve_poisson_periodic_single(initialCond,solverOpts,Ntarget,Ptarget,Rtarget)
+      error = max(max(abs(cond.EcWavefunctions.phiOrig-cond.phi)),max(abs(cond.EvWavefunctions.phiOrig-cond.phi)))
+      if solverOpts.verboseLevel >= 4:
+        print ' > Outer iteration %i; Error ='%itr,error
+      converged = error < solverOpts.quantumConvergenceThreshold
+      if not converged:
+        initialCond = cond.offset(0,0,0,keepWavefunctions=False)
+    if converged:
+      cond.quantumConverged = True
+      return cond
+    else:
+      raise ValueError, 'Solver failed to converge!'
+  
+def solve_nonequilibrium(initialCond,solverOpts=SolverOpts(),Jtarget=None):
+  '''
+  '''
+  return solve_nonequilibrium_single(initialCond,solverOpts,Jtarget)
  
 def bias(initialCond,solverOpts=SolverOpts(),Vtarget=None,Jtarget=None):
   ''' Solve for the structure at the specified voltage or current.
