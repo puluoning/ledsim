@@ -1,12 +1,7 @@
 ''' Base module for LEDSIM.
 '''
-import scipy
-import scipy.constants
-import scipy.linalg
-import scipy.sparse
-import scipy.sparse.linalg
-import pylab
-import time
+import scipy, scipy.constants, scipy.linalg, scipy.sparse, scipy.sparse.linalg
+import copy, pylab, time
 
 pi       = scipy.pi
 c        = scipy.constants.c
@@ -116,9 +111,12 @@ class ModelOpts(GenericOpts,Access):
           determines whether radiative recombination is enabled
         auger : boolean
           determines whether Auger recombination is enabled
+        quantum : boolean
+          determines whether quantum models are used for calculating carrier
+          densities
   '''
   validAttrs = ['T','dkBulk','cBandOffset','polarization','defect',
-                'radiative','auger']
+                'radiative','auger','quantum']
   
   def __init__(self,**kwargs):
     ''' Construct the ModelOpts object. Keyword input arguments can be used to
@@ -131,8 +129,9 @@ class ModelOpts(GenericOpts,Access):
     self.defect               = True
     self.radiative            = True
     self.auger                = True
+    self.quantum              = False
     for attr, value in kwargs.items():
-      self.__setattr__(self,attr,value)
+      self.__setattr__(attr,value)
 
 class SolverOpts(GenericOpts,Access):
   ''' SolverOpts controls methods used in the solve module. SolverOpts has the
@@ -167,7 +166,8 @@ class SolverOpts(GenericOpts,Access):
           4 : 3 + output per solver iteration
   ''' 
   validAttrs = ['dphi','maxAllowedCorrection','convergenceThreshold',
-                'maxitr','maxitrOuter','Jmin','dVmax','verboseLevel']
+                'maxitr','maxitrOuter','Jmin','dVmax','verboseLevel',
+                'quantumConvergenceThreshold']
   
   def __init__(self,**kwargs):
     ''' Construct the SolverOpts object. Keyword input arguments can be used to
@@ -181,6 +181,7 @@ class SolverOpts(GenericOpts,Access):
     self.Jmin                 = 1e-2
     self.dVmax                = 0.5
     self.verboseLevel         = 1
+    self.quantumConvergenceThreshold = 1e-4
     for attr, value in kwargs.items():
       self.__setattr__(attr,value)
 
@@ -201,7 +202,8 @@ class QuantumOpts(GenericOpts,Access):
         thetaRes : int
           Number of angular points at given k where wavefunctions are calculated.
   '''
-  validAttrs = ['deltaE','deltaEk','dk','thetaRes','padLength','blendLength']
+  validAttrs = ['deltaE','deltaEk','dk','thetaRes','padLength','blendLength',
+                'quantumType','boundaryType']
   
   def __init__(self,**kwargs):
     ''' Construct the QuantumOpts object. Keyword input arguments can be used to
@@ -213,8 +215,10 @@ class QuantumOpts(GenericOpts,Access):
     self.thetaRes             = 1
     self.padLength            = 1e-8 
     self.blendLength          = 3e-9
+    self.quantumType          = 'parabolic'
+    self.boundaryType         = 'Dirichlet'
     for attr, value in kwargs.items():
-      self.__setattr__(self,attr,value)
+      self.__setattr__(attr,value)
 
 class Grid(Access):
   ''' Grid object contains the grid information for a structure. The object has
@@ -259,8 +263,8 @@ class Grid(Access):
     self.znum     = len(self.z)
     self.rnum     = len(self.zr)
     self.gridOpts = gridOpts
-#    self.qIndex   = scipy.arange(qStart+1,qEnd+2)
-#    self.qrIndex  = scipy.arange(qStart+1,qEnd+1)
+    self.qIndex   = scipy.arange(qStart,qEnd+1)   # Wavefunction index
+    self.qrIndex  = scipy.arange(qStart,qEnd)     # Quantum region index
 
   def get_dz_segment(self,d1,dn,L):
     ''' Calculate the vector of gridpoint spacing given a segment of length L
@@ -366,7 +370,7 @@ class Layer(Access):
       else:
         raise AttributeError, '%s is not a valid attribute for %s' %(attr,material)
 
-def build(layers,substrate=None,gridOpts=GridOpts(),modelOpts=ModelOpts()):
+def build(layers,substrate=None,gridOpts=GridOpts(),modelOpts=ModelOpts(),quantumOpts=QuantumOpts()):
   ''' Build takes a list of layers and creates a structure; the equilibrium
       condition is calculated and returned. Optionally, the substrate can
       be specified, and grid options and model options can be supplied. Also,
@@ -396,6 +400,7 @@ def build(layers,substrate=None,gridOpts=GridOpts(),modelOpts=ModelOpts()):
   sub = Structure(None,mat,None)
   s = Structure(Grid(layers,gridOpts),mat,sub)
   s.modelOpts = modelOpts
+  s.quantumOpts = quantumOpts
   for attr in mat.subAttrs.keys():
     s[attr] = scipy.ones(s.grid.rnum)*substrate[attr]
     sub[attr] = substrate[attr]
