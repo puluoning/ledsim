@@ -54,8 +54,6 @@ class AlGaInN():
       {'phi'        : {'defaultValue':0.},
        'theta'      : {'defaultValue':0.}}
     
-    self.overrideAttrsMethod = self.get_basic_params
-    
     # Dictionary that specifies how additional material parameters are
     # calculated.
     self.attrSwitch = \
@@ -110,27 +108,30 @@ class AlGaInN():
        'epsyx'      : self.get_strain,
        'Ppz'        : self.get_polarization,
        'Ptot'       : self.get_polarization,
-       'Eg'         : self.get_band_params,
-       'Ec0'        : self.get_band_params,
-       'Ev0'        : self.get_band_params,
-       'mex'        : self.get_band_params,
-       'mey'        : self.get_band_params,
-       'mez'        : self.get_band_params,
-       'mhx'        : self.get_band_params,
-       'mhy'        : self.get_band_params,
-       'mhz'        : self.get_band_params,
-       'med'        : self.get_band_params,
-       'mhd'        : self.get_band_params,
-       'Nc'         : self.get_band_params,
-       'Nv'         : self.get_band_params}
+       'Eg'         : self.get_band_params_parabolic,
+       'Ec0'        : self.get_band_params_parabolic,
+       'Ev0'        : self.get_band_params_parabolic,
+       'mex'        : self.get_band_params_parabolic,
+       'mey'        : self.get_band_params_parabolic,
+       'mez'        : self.get_band_params_parabolic,
+       'mhx'        : self.get_band_params_parabolic,
+       'mhy'        : self.get_band_params_parabolic,
+       'mhz'        : self.get_band_params_parabolic,
+       'med'        : self.get_band_params_parabolic,
+       'mhd'        : self.get_band_params_parabolic,
+       'Nc'         : self.get_band_params_parabolic,
+       'Nv'         : self.get_band_params_parabolic,
+       'CHc'        : self.get_C_Hc1x1,
+       'CHv'        : self.get_C_Hv3x3}
     
     # Apply override attributes. Note: only the attrs set by the method given
     # by overrideAttrsMethod can be overridden. This method accepts only
     # the structure as input, not the substrate.
+    self.overrideAttrsMethod = self.get_basic_params
     self.overrideAttrs = {}
     for attr, method in overrideAttrs.items():
       if attr in self.attrSwitch.keys() and \
-        self.attrSwitch[attr] == self.get_basic_params:
+        self.attrSwitch[attr] == self.overrideAttrsMethod:
         self.overrideAttrs[attr] = overrideAttrs[attr]
       else:
         raise AttributeError, '%s is not an attr valid for override' %(attr)
@@ -253,7 +254,7 @@ class AlGaInN():
     s.Ppz = -4*s.d13*(s.alc0-sub.alc0)/(s.alc0+sub.alc0)*(s.C11+s.C12-2*s.C13**2/s.C33)
     s.Ptot = (s.Ppz+s.Psp)*s.modelOpts.polarization
   
-  def get_C_Hc1x1(s,kx,ky):
+  def get_C_Hc1x1(self,s,sub):
     ''' Return the C matrices for the conduction band Hamiltonian for the given
         kx and ky values. Also return the kpSize, degeneracy, and angular
         periodicity in the kx/ky plane.
@@ -263,21 +264,30 @@ class AlGaInN():
         C3 corresponds to type 3 terms (   C3 kz)
         C4 corresponds to type 4 terms (   C4   )
     '''
-    kpSize      = 1
-    degen       = 2
+    kpSize = 1
+    degen = 2
     thetaPeriod = pi
-    C1 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
-    C2 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
-    C3 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
-    C4 = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
-
-    C1[0,0,:] = hbar**2/(2*s.meperp)
-    C4[0,0,:] = s.Eref+s.Eg0+s.delcr+s.delso/3+hbar**2/(2*s.mepara)*(kx**2+ky**2)+ \
-                (s.a1+s.D1)*s.epszz+(s.a2+s.D2)*(s.epsxx+s.epsyy)
     
-    return C1, C2, C3, C4, kpSize, degen, thetaPeriod
+    def C1(kx,ky):
+      mat = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      mat[0,0,:] = hbar**2/(2*s.meperp)
+      return mat
+      
+    def C2(kx,ky):
+      return scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      
+    def C3(kx,ky):
+      return scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      
+    def C4(kx,ky):
+      mat = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      mat[0,0,:] = s.Eref+s.Eg0+s.delcr+s.delso/3+hbar**2/(2*s.mepara)*(kx**2+ky**2)+ \
+                   (s.a1+s.D1)*s.epszz+(s.a2+s.D2)*(s.epsxx+s.epsyy)
+      return mat
 
-  def get_C_Hv6x6(cond,kx,ky,boundaryType=0):
+    s.CHc = {'C1':C1,'C2':C2,'C3':C3,'C4':C4,'kpSize':kpSize,'degen':degen,'thetaPeriod':thetaPeriod}    
+
+  def get_C_Hv3x3(self,s,sub):
     ''' Return the C matrices for the valence band Hamiltonian for the given
         kx and ky values. Also return the kpSize, degeneracy, and angular
         periodicity in the kx/ky plane.
@@ -287,39 +297,53 @@ class AlGaInN():
         C3 corresponds to type 3 terms (   C3 kz)
         C4 corresponds to type 4 terms (   C4   )
     '''
-    kpSize = 6
-    degen       = 1
+    kpSize = 3
+    degen = 2
     thetaPeriod = pi
-    C1 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
-    C2 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
-    C3 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
-    C4 = scipy.complex128(scipy.zeros((kpSize,kpSize,cond.grid.rnum)))
-  
-    C1[0,0,:] = hbar**2/(2*m0)*(cond.A1+cond.A3)
-    C1[1,1,:] = hbar**2/(2*m0)*(cond.A1+cond.A3)
-    C1[2,2,:] = hbar**2/(2*m0)*cond.A1
-    C2[0,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C2[1,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C2[2,0,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C2[2,1,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C3[0,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C3[1,2,:] = -1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C3[2,0,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C3[2,1,:] =  1j*hbar**2/(2*m0)*cond.A6*kt/2
-    C4[0,0,:] = cond.Eref+cond.delcr+cond.delso/3+hbar**2/(2*m0)*(cond.A2+cond.A4)*kt**2+ \
-                (cond.D1+cond.D3)*cond.epszz+(cond.D2+cond.D4)*2*cond.epsxx
-    C4[0,1,:] = hbar**2/(2*m0)*cond.A5*kt**2
-    C4[1,0,:] = hbar**2/(2*m0)*cond.A5*kt**2
-    C4[1,1,:] = cond.Eref+cond.delcr-cond.delso/3+hbar**2/(2*m0)*(cond.A2+cond.A4)*kt**2+ \
-                (cond.D1+cond.D3)*cond.epszz+(cond.D2+cond.D4)*2*cond.epsxx
-    C4[1,2,:] = scipy.sqrt(2)*cond.delso/3
-    C4[2,1,:] = scipy.sqrt(2)*cond.delso/3
-    C4[2,2,:] = cond.Eref+hbar**2/(2*m0)*cond.A2*kt**2+ \
-                cond.D1*cond.epszz+cond.D2*2*cond.epsxx
+    
+    def C1(kx,ky):
+      mat = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      mat[0,0,:] = hbar**2/(2*m0)*(s.A1+s.A3)
+      mat[1,1,:] = hbar**2/(2*m0)*(s.A1+s.A3)
+      mat[2,2,:] = hbar**2/(2*m0)*s.A1
+      return mat
+    
+    def C2(kx,ky):
+      kt = scipy.sqrt(kx**2+ky**2)
+      mat = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      mat[0,2,:] = -1j*hbar**2/(2*m0)*s.A6*kt/2
+      mat[1,2,:] = -1j*hbar**2/(2*m0)*s.A6*kt/2
+      mat[2,0,:] =  1j*hbar**2/(2*m0)*s.A6*kt/2
+      mat[2,1,:] =  1j*hbar**2/(2*m0)*s.A6*kt/2
+      return mat
+    
+    def C3(kx,ky):
+      kt = scipy.sqrt(kx**2+ky**2)
+      mat = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      mat[0,2,:] = -1j*hbar**2/(2*m0)*s.A6*kt/2
+      mat[1,2,:] = -1j*hbar**2/(2*m0)*s.A6*kt/2
+      mat[2,0,:] =  1j*hbar**2/(2*m0)*s.A6*kt/2
+      mat[2,1,:] =  1j*hbar**2/(2*m0)*s.A6*kt/2
+      return mat
+    
+    def C4(kx,ky):
+      kt = scipy.sqrt(kx**2+ky**2)
+      mat = scipy.complex128(scipy.zeros((kpSize,kpSize,s.grid.rnum)))
+      mat[0,0,:] = s.Eref+s.delcr+s.delso/3+hbar**2/(2*m0)*(s.A2+s.A4)*kt**2+ \
+                   (s.D1+s.D3)*s.epszz+(s.D2+s.D4)*2*s.epsxx
+      mat[0,1,:] = hbar**2/(2*m0)*s.A5*kt**2
+      mat[1,0,:] = hbar**2/(2*m0)*s.A5*kt**2
+      mat[1,1,:] = s.Eref+s.delcr-s.delso/3+hbar**2/(2*m0)*(s.A2+s.A4)*kt**2+ \
+                   (s.D1+s.D3)*s.epszz+(s.D2+s.D4)*2*s.epsxx
+      mat[1,2,:] = scipy.sqrt(2)*s.delso/3
+      mat[2,1,:] = scipy.sqrt(2)*s.delso/3
+      mat[2,2,:] = s.Eref+hbar**2/(2*m0)*s.A2*kt**2+ \
+                   s.D1*s.epszz+s.D2*2*s.epsxx
+      return mat
 
-    return C1, C2, C3, C4, kpSize, degen, thetaPeriod
+    s.CHv = {'C1':C1,'C2':C2,'C3':C3,'C4':C4,'kpSize':kpSize,'degen':degen,'thetaPeriod':thetaPeriod}
   
-  def get_band_params(self,s,sub):
+  def get_band_params_parabolic(self,s,sub):
     ''' Calculate parameters related to the band structure.
     '''
     dk = s.modelOpts.dkBulk
@@ -362,6 +386,16 @@ class AlGaInN():
     s.Nc  = 1/scipy.sqrt(2)*(s.med*kB*s.modelOpts.T/(pi*hbar**2))**(3./2);
     s.Nv  = 1/scipy.sqrt(2)*(s.mhd*kB*s.modelOpts.T/(pi*hbar**2))**(3./2);
 
+  def get_band_params_nonparabolic(self,s,sub):
+    ''' Get nonparabolic band params.
+    '''
+    pass
+  
+  def bulk_bands_calculator_2(self,s,sub,kx,ky,kz):
+    ''' Calculate the bulk band structure using the Hamiltonian.
+    '''
+    pass
+  
   def bulk_bands_calculator(self,s,sub,kx,ky,kz):
     ''' Calculate the band energies for the specified kx, ky, and kz values.
         The 3x3 Hamiltonian for wurtzite crystals is used for the valence,
