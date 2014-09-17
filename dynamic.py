@@ -2,7 +2,7 @@
     e.g. carrier concentration, which depend upon the electrical bias.
 '''
 from ledsim import *
-import calc, out
+import calc, out, quantum
 
 class Condition(Access):
   ''' Class for dynamically calculated attributes, i.e. those which depend
@@ -10,7 +10,7 @@ class Condition(Access):
       of the structure may be referenced directly as though they were
       attributes of the condition.
   '''     
-  def __init__(self,struct=None,phi=None,phiN=None,phiP=None,wavefunctions=None):
+  def __init__(self,struct=None,phi=None,phiN=None,phiP=None,EcWavefunctions=None,EvWavefunctions=None):
     ''' Initialize the condition; this requires the structure, the electrostatic
         potential phi, and the quasi-potentials phiN and phiP.
     '''
@@ -18,7 +18,10 @@ class Condition(Access):
     self.phi    = phi
     self.phiN   = phiN
     self.phiP   = phiP
-    self.wavefunctions = wavefunctions
+    if EcWavefunctions != None:
+      self.EcWavefunctions = EcWavefunctions
+    if EvWavefunctions != None:
+      self.EvWavefunctions = EvWavefunctions
     self.attrSwitch = \
       {'Efn'         : self.get_band_edges,
        'Efp'         : self.get_band_edges,
@@ -80,7 +83,9 @@ class Condition(Access):
        'Tndef'       : self.get_nonradiative_lifetimes,
        'Tpdef'       : self.get_nonradiative_lifetimes,
        'Vthn'        : self.get_nonradiative_lifetimes,
-       'Vthp'        : self.get_nonradiative_lifetimes}
+       'Vthp'        : self.get_nonradiative_lifetimes,
+       'EcWavefunctions' : self.get_wavefunctions_cb,
+       'EvWavefunctions' : self.get_wavefunctions_vb}
   
   def __getattribute__(self,attr):
     ''' If the structure object already has the requested attribute, return it;
@@ -121,11 +126,14 @@ class Condition(Access):
         dphiN, and dphiP. This is useful in calculating derivatives and applying
         corrections, e.g. in a solver.
     '''
-    if keepWavefunctions:
-      return Condition(self.struct,self.phi+dphi,self.phiN+dphiN,self.phiP+dphiP,\
-                       self.wavefunctions)
-    else:
-      return Condition(self.struct,self.phi+dphi,self.phiN+dphiN,self.phiP+dphiP)
+    EcWavefunctions = None
+    EvWavefunctions = None
+    if keepWavefunctions and 'EcWavefunctions' in self.attrs():
+      EcWavefunctions = self.EcWavefunctions
+    if keepWavefunctions and 'EvWavefunctions' in self.attrs():
+      EvWavefunctions = self.EvWavefunctions
+    return Condition(self.struct,self.phi+dphi,self.phiN+dphiN,self.phiP+dphiP,\
+                     EcWavefunctions,EvWavefunctions)
 
   def get_iv(self):
     ''' Get the voltage, total current density, electron and hole current density
@@ -164,24 +172,26 @@ class Condition(Access):
   def get_carriers_quantum(self,phi,phiN,phiP):
     ''' Calculate the carrier density at each gridpoint in the quantum region.
     '''         
-    def fc(Ef,E):
-      return 1./(1+scipy.exp((E[:,scipy.newaxis]-Ef-q*(phiOrig-phi))/(kB*cond.modelOpts.T)))
-    def fv(Ef,E):
-      return 1.-fc(Ef,E)
-    
+    def fc(Ef,E,phiOrig):
+      return 1./(1+scipy.exp((E[:,scipy.newaxis]-Ef-q*(phiOrig-self.phi))/(kB*self.modelOpts.T)))
+    def fv(Ef,E,phiOrig):
+      return 1.-fc(Ef,E,phiOrig)
+
+    wf = self.EcWavefunctions
     Efn = q*(phiN-phi)[self.grid.qIndex]
-    phiOrig = self.EcWavefunctions.phiOrig
+    phiOrig = wf.phiOrig
     n = scipy.zeros(len(self.grid.qIndex))
-    for kpt in self.EcWavefunctions.psiDict.values():
-      n += scipy.sum(kpt['psisq']*kpt['Vk']*scipy.transpose(fc(Efn,kpt['E'])),1)
-    n = n/(4*pi**2)*self.EcWavefunctions.degen
+    for ii in range(len(wf.k)):
+      n += scipy.sum(wf.psisq[ii]*wf.vk[ii]*scipy.transpose(fc(Efn,wf.Ek[ii],phiOrig)),1)
+    n = n/(4*pi**2)*wf.degen
     
+    wf = self.EvWavefunctions
     Efp = q*(phiP-phi)[self.grid.qIndex]
-    phiOrig = self.EvWavefunctions.phiOrig
+    phiOrig = wf.phiOrig
     p = scipy.zeros(len(self.grid.qIndex))
-    for kpt in self.EvWavefunctions.psiDict.values():
-      p += scipy.sum(kpt['psisq']*kpt['Vk']*scipy.transpose(fv(Efp,kpt['E'])),1)
-    p = p/(4*pi**2)*self.EvWavefunctions.degen
+    for ii in range(len(wf.k)):
+      p += scipy.sum(wf.psisq[ii]*wf.vk[ii]*scipy.transpose(fv(Efp,wf.Ek[ii],phiOrig)),1)
+    p = p/(4*pi**2)*wf.degen
     return n, p
 
   def get_carriers(self,phi,phiN,phiP):
@@ -214,10 +224,16 @@ class Condition(Access):
     self.RNdIonized = scipy.zeros(self.grid.znum)
     self.LNaIonized = scipy.zeros(self.grid.znum)
     self.RNaIonized = scipy.zeros(self.grid.znum)
-    self.Ln[1: ], self.Lp[1: ], self.LNdIonized[1: ], self.LNaIonized[1: ] = \
+    self.Ln[1: ],self.Lp[1: ],self.LNdIonized[1: ],self.LNaIonized[1: ] = \
       self.get_carriers(self.phi[ 1:],self.phiN[ 1:],self.phiP[ 1:])
-    self.Rn[:-1], self.Rp[:-1], self.RNdIonized[:-1], self.RNaIonized[:-1] = \
+    self.Rn[:-1],self.Rp[:-1],self.RNdIonized[:-1],self.RNaIonized[:-1] = \
       self.get_carriers(self.phi[:-1],self.phiN[:-1],self.phiP[:-1])
+    if self.modelOpts.quantum:
+      n,p = self.get_carriers_quantum(self.phi,self.phiN,self.phiP)
+      self.Ln[1:]  = n[1:]
+      self.Rn[:-1] = n[:-1]
+      self.Lp[1:]  = p[1:]
+      self.Rp[:-1] = p[:-1]
   
   def get_rho(self):
     ''' Calculate the positive, negative, and total charge density to the left 
@@ -359,3 +375,36 @@ class Condition(Access):
     self.Vthp  = scipy.sqrt(3*kBT/m_eff(self.mhx,self.mhy,self.mhz))
     self.Tndef = 1/(self.Ndef*self.CCSn*self.Vthn)
     self.Tpdef = 1/(self.Ndef*self.CCSp*self.Vthp)
+
+  def Hc(self,kx,ky,boundaryType='Dirichlet'):
+    ''' Return the conduction band Hamiltonian for this condition for the
+        specified transverse wavevectors.
+    '''
+    C1 = self.CHc['C1'](kx,ky)[:,:,self.grid.qrIndex]
+    C2 = self.CHc['C2'](kx,ky)[:,:,self.grid.qrIndex]
+    C3 = self.CHc['C3'](kx,ky)[:,:,self.grid.qrIndex]
+    C4 = self.CHc['C4'](kx,ky)[:,:,self.grid.qrIndex]
+    padCount = int(self.quantumOpts.padLength/self.grid.dz[self.grid.qrIndex[0]])   
+    return quantum.assemble_hamiltonian(C1,C2,C3,C4,self.phi[self.grid.qIndex],
+                                        self.grid.dz[self.grid.qrIndex],boundaryType)
+    
+  def Hv(self,kx,ky,boundaryType='Dirichlet'):
+    ''' Return the valence band Hamiltonian for this condition for the
+        specified transverse wavevectors.
+    '''
+    C1 = self.CHv['C1'](kx,ky)[:,:,self.grid.qrIndex]
+    C2 = self.CHv['C2'](kx,ky)[:,:,self.grid.qrIndex]
+    C3 = self.CHv['C3'](kx,ky)[:,:,self.grid.qrIndex]
+    C4 = self.CHv['C4'](kx,ky)[:,:,self.grid.qrIndex]  
+    return quantum.assemble_hamiltonian(C1,C2,C3,C4,self.phi[self.grid.qIndex],
+                                        self.grid.dz[self.grid.qrIndex],boundaryType)
+    
+  def get_wavefunctions_cb(self):
+    '''
+    '''
+    self.EcWavefunctions = quantum.Wavefunctions(self,'Ec',self.quantumOpts.boundaryType)
+  
+  def get_wavefunctions_vb(self):
+    '''
+    '''
+    self.EvWavefunctions = quantum.Wavefunctions(self,'Ev',self.quantumOpts.boundaryType)
