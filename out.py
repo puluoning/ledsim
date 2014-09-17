@@ -126,19 +126,19 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None,**kwargs):
   elif plotType == 'EcWavefunctions':
     if isUseSmoothing:
       zp = cond.grid.z*1e9
-      EcPlot  = -cond.phi+interp(cond.Ec0)/eV
+      EcPlot = -cond.phi+interp(cond.Ec0)/eV
     else:
       zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
-      EcPlot  = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ec0,2)/eV 
+      EcPlot = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ec0,2)/eV
+    zpsi = cond.grid.z*1e9
     psiSpacing = kwargs['psiSpacing'] if 'psiSpacing' in kwargs else 0.025
-    threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-9
-    pylab.plot(zp,EcPlot,'k')
-    zp = cond.grid.z[cond.grid.qIndex]*1e9
-    for band in cond.wavefunctions.EcSubbands:
-      E,psisq = band.get_energy(0,0,isGetPsisq=True)
+    threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-5
+    pylab.plot(zp,EcPlot,'k',zpsi,cond.Efn/eV,'r')
+    for ii,Ek in enumerate(cond.EcWavefunctions.Ek[0]):
+      psisq = cond.EcWavefunctions.psisq[0][:,ii]
       scaleFactor = psiSpacing/max(psisq)
       ind = abs(psisq*scaleFactor) > threshold
-      pylab.plot(zp[ind],psisq[ind]*scaleFactor+E/eV,'g')
+      pylab.plot(zpsi[ind],psisq[ind]*scaleFactor+Ek/eV,'g')      
     pylab.xlim([0,zp[-1]])
     pylab.ylabel('Energy [eV]')
     pylab.xlabel('Position [nm]')
@@ -146,52 +146,53 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None,**kwargs):
   elif plotType == 'EvWavefunctions':
     if isUseSmoothing:
       zp = cond.grid.z*1e9
-      EvPlot  = -cond.phi+interp(cond.Ev0[0,:])/eV
+      EvPlot = -cond.phi+interp(cond.Ev0[0,:])/eV
     else:
-      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9 
-      EvPlot  = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ev0[0,:],2)/eV
-    pylab.plot(zp,EvPlot,'k')
+      zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
+      EvPlot = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ev0,2)/eV
+    zpsi = cond.grid.z*1e9
     psiSpacing = kwargs['psiSpacing'] if 'psiSpacing' in kwargs else 0.025
-    threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-9
-    zp = cond.grid.z[cond.grid.qIndex]*1e9
-    for band in cond.wavefunctions.EvSubbands:
-      E,psisq = band.get_energy(0,0,isGetPsisq=True)
-      scaleFactor = -psiSpacing/max(psisq)
+    threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-5
+    pylab.plot(zp,EvPlot,'k',zpsi,cond.Efp/eV,'b')
+    for ii,Ek in enumerate(cond.EvWavefunctions.Ek[0]):
+      psisq = cond.EvWavefunctions.psisq[0][:,ii]
+      scaleFactor = psiSpacing/max(psisq)
       ind = abs(psisq*scaleFactor) > threshold
-      pylab.plot(zp[ind],psisq[ind]*scaleFactor+E/eV,'g')
+      pylab.plot(zpsi[ind],psisq[ind]*scaleFactor+Ek/eV,'g')      
     pylab.xlim([0,zp[-1]])
     pylab.ylabel('Energy [eV]')
     pylab.xlabel('Position [nm]')
     
-  elif plotType == 'EcSubbands':
-    kmax = kwargs['kmax'] if 'kmax' in kwargs.keys() else 1e9
-    dk   = cond.modelOpts.dkQuantumInterp
-    k1   = scipy.arange(0,kmax+dk,dk)
-    t1   = scipy.ones(len(k1))*0.
-    k2   = scipy.arange(0,kmax+dk,dk)
-    t2   = scipy.ones(len(k1))*cond.modelOpts.thetaPeriod/2
-    for band in cond.wavefunctions.EcSubbands:
-      E1 = band.get_energy(k1,t1)
-      E2 = band.get_energy(k2,t2)
-      pylab.plot( k1/1e9,E1/eV,'b')
-      pylab.plot(-k2/1e9,E2/eV,'r')
-    pylab.ylabel('Energy [eV]')
-    pylab.xlabel('|k|')
+  # elif plotType == 'EcSubbands':
+    # kmax = kwargs['kmax'] if 'kmax' in kwargs.keys() else 1e9
+    # dk   = cond.modelOpts.dkQuantumInterp
+    # k1   = scipy.arange(0,kmax+dk,dk)
+    # t1   = scipy.ones(len(k1))*0.
+    # k2   = scipy.arange(0,kmax+dk,dk)
+    # t2   = scipy.ones(len(k1))*cond.modelOpts.thetaPeriod/2
+    # for band in cond.wavefunctions.EcSubbands:
+      # E1 = band.get_energy(k1,t1)
+      # E2 = band.get_energy(k2,t2)
+      # pylab.plot( k1/1e9,E1/eV,'b')
+      # pylab.plot(-k2/1e9,E2/eV,'r')
+    # pylab.ylabel('Energy [eV]')
+    # pylab.xlabel('|k|')
 
-  elif plotType == 'EvSubbands':
-    kmax = kwargs['kmax'] if 'kmax' in kwargs.keys() else 1e9
-    dk   = cond.modelOpts.dkQuantumInterp
-    k1   = scipy.arange(0,kmax+dk,dk)
-    t1   = scipy.ones(len(k1))*0.
-    k2   = scipy.arange(0,kmax+dk,dk)
-    t2   = scipy.ones(len(k1))*cond.modelOpts.thetaPeriod/2
-    for band in cond.wavefunctions.EvSubbands:
-      E1 = band.get_energy(k1,t1)
-      E2 = band.get_energy(k2,t2)
-      pylab.plot( k1/1e9,E1/eV,'b')
-      pylab.plot(-k2/1e9,E2/eV,'r')
-    pylab.ylabel('Energy [eV]')
-    pylab.xlabel('|k|')
+  # elif plotType == 'EvSubbands':
+    # kmax = kwargs['kmax'] if 'kmax' in kwargs.keys() else 1e9
+    # dk   = cond.modelOpts.dkQuantumInterp
+    # k1   = scipy.arange(0,kmax+dk,dk)
+    # t1   = scipy.ones(len(k1))*0.
+    # k2   = scipy.arange(0,kmax+dk,dk)
+    # t2   = scipy.ones(len(k1))*cond.modelOpts.thetaPeriod/2
+    # for band in cond.wavefunctions.EvSubbands:
+      # E1 = band.get_energy(k1,t1)
+      # E2 = band.get_energy(k2,t2)
+      # pylab.plot( k1/1e9,E1/eV,'b')
+      # pylab.plot(-k2/1e9,E2/eV,'r')
+    # pylab.ylabel('Energy [eV]')
+    # pylab.xlabel('|k|')
   
   else:
     raise ValueError, 'Unknown plotType!'
+
