@@ -44,12 +44,12 @@ def neq_tol(a,b,tol=1e-6):
 def leq_tol(a,b,tol=1e-6):
   ''' Check whether a is less or equal to b allowing for the specified tolerance.
   '''
-  return a < b or eq_tol(a,b,tol)
+  return (a < b) + eq_tol(a,b,tol)
 
 def geq_tol(a,b,tol=1e-6):
   ''' Check whether a is greater or equal to b allowing for the specified tolerance.
   '''
-  return a > b or eq_tol(a,b,tol)
+  return (a > b) + eq_tol(a,b,tol)
 
 def merge_eigs(eigsDict,tol=1e-6):
   ''' Merge the eigenvectors/eigenvalues which are the items of the dictionary 
@@ -74,6 +74,7 @@ def eigs_sorted(mat,sigma,k,isTime=False):
       is returned. The eigenvectors are scaled so that the phase is equal 
       to zero where the magnitude is largest.
   '''
+  k = min(k,scipy.shape(mat)[0]-2)
   t0 = time.time()
   eigval,eigvec = scipy.sparse.linalg.eigs(mat,k=k,sigma=sigma)
   eigsTime = time.time()-t0
@@ -132,7 +133,10 @@ def eigs_range(mat,startVal,endVal,k=24,tol=1e-6,guessOffset=2,maxitr=100,isGetS
   if not done:
     raise ValueError, 'Maximum number of iterations exceeded!'
   w,v = merge_eigs(eigsDict)
-  ind = (w <= max([startVal,endVal]))*(w >= min([startVal,endVal]))
+  ind = leq_tol(w,max([startVal,endVal]))*geq_tol(w,min([startVal,endVal]))
+  if True not in ind:
+    dist = w-(startVal+endVal)/2
+    ind[scipy.argmin(dist)] = True
   stats['numEigs']   = scipy.sum(ind)
   stats['eigsCalls'] = itr
   stats['totalTime'] = time.time()-t0
