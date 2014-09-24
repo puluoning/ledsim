@@ -65,7 +65,7 @@ def solve_equilibrium_local(struct,solverOpts=SolverOpts()):
     struct.modelOpts.quantum = isQuantum
     return cond
   else:
-    raise ValueError, 'solve.solve_equilibrium failed to converge!'
+    raise ValueError, 'Solver failed to converge!'
     
 def solve_poisson_single(initialCond,solverOpts):
   ''' Solves the Poisson equation, i.e. the condition of zero applied bias. The
@@ -406,7 +406,13 @@ def solve_poisson(initialCond,solverOpts=SolverOpts()):
   '''
   if solverOpts.verboseLevel >= 3:
     print '>> running solve.solve_poisson;'
+  if isinstance(initialCond,Structure):
+    if solverOpts.verboseLevel >= 4:
+      print ' > solving for local equilibrium;'
+    initialCond = solve_equilibrium_local(initialCond,solverOpts)
   if not initialCond.modelOpts.quantum:
+    if solverOpts.verboseLevel >= 4:
+      print ' > solving classical problem;'
     return solve_poisson_single(initialCond,solverOpts)
   else:
     if not initialCond.quantumConverged:
@@ -415,6 +421,8 @@ def solve_poisson(initialCond,solverOpts=SolverOpts()):
       initialCond.modelOpts.quantum = False
       initialCond = solve_poisson_periodic_single(initialCond,solverOpts)
       initialCond.modelOpts.quantum = True
+    if solverOpts.verboseLevel >= 4:
+      print ' > solving quantum problem;'
     itr = 0
     converged = False
     solverOpts.maxitrOuter = 3
@@ -442,7 +450,13 @@ def solve_poisson_periodic(initialCond,solverOpts=SolverOpts(),Ntarget=None,Ptar
   '''
   if solverOpts.verboseLevel >= 3:
     print '>> running solve.solve_poisson_periodic;'
+  if isinstance(initialCond,Structure):
+    if solverOpts.verboseLevel >= 4:
+      print ' > solving for local equilibrium;'
+    initialCond = solve_equilibrium_local(initialCond,solverOpts)
   if not initialCond.modelOpts.quantum:
+    if solverOpts.verboseLevel >= 4:
+      print ' > solving classical problem;'
     return solve_poisson_periodic_single(initialCond,solverOpts,Ntarget,Ptarget,Rtarget)
   else:
     if not initialCond.quantumConverged:
@@ -451,6 +465,8 @@ def solve_poisson_periodic(initialCond,solverOpts=SolverOpts(),Ntarget=None,Ptar
       initialCond.modelOpts.quantum = False
       initialCond = solve_poisson_periodic_single(initialCond,solverOpts,Ntarget,Ptarget,Rtarget)
       initialCond.modelOpts.quantum = True
+    if solverOpts.verboseLevel >= 4:
+      print ' > solving quantum problem;'
     itr = 0
     converged = False
     solverOpts.maxitrOuter = 3
@@ -495,7 +511,7 @@ def bias(initialCond,solverOpts=SolverOpts(),Vtarget=None,Jtarget=None):
       else:
         guess = solve_prep(cond,cond.V+dV,solverOpts)
       try:
-        cond = solve_nonequilibrium(guess,solverOpts=solverOpts)
+        cond = solve_nonequilibrium_single(guess,solverOpts=solverOpts)
         dV = min(1.1*dV,solverOpts.dVmax)
         if Jtarget != None:
           done = cond.J > Jtarget
@@ -508,7 +524,10 @@ def bias(initialCond,solverOpts=SolverOpts(),Vtarget=None,Jtarget=None):
       return cond
 
   if isinstance(initialCond,Structure):
-    cond = solve_equilibrium(solve_equilibrium_local(initialCond,solverOpts),solverOpts)
+    isQuantum = initialCond.modelOpts.quantum
+    initialCond.modelOpts.quantum = False
+    cond = solve_poisson(solve_equilibrium_local(initialCond,solverOpts),solverOpts)
+    initialCond.modelOpts.quantum = isQuantum
   else:
     cond = initialCond.offset(0,0,0)
   if Jtarget != None:
@@ -516,7 +535,7 @@ def bias(initialCond,solverOpts=SolverOpts(),Vtarget=None,Jtarget=None):
       print '>> Solving for bias condition: J='+str(Jtarget)+'A/m2'
     if cond.J < solverOpts.Jmin:
       cond = voltage_ramp(cond,solverOpts=solverOpts,Jtarget=Jtarget)  
-      cond = solve_nonequilibrium(cond,solverOpts=solverOpts,Jtarget=Jtarget)
+      cond = solve_nonequilibrium_single(cond,solverOpts=solverOpts,Jtarget=Jtarget)
     else:
       cond = solve_nonequilibrium(cond,solverOpts=solverOpts,Jtarget=Jtarget)
   elif Vtarget != None:
