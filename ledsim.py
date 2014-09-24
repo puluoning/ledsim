@@ -264,7 +264,7 @@ class Grid(Access):
     self.rnum     = len(self.zr)
     self.gridOpts = gridOpts
     self.qIndex   = scipy.arange(qStart,qEnd+1)   # Wavefunction index
-    self.qrIndex  = scipy.arange(qStart,qEnd)     # Quantum region index
+    self.qrIndex  = scipy.arange(qStart,qEnd)     # Quantum region index   
 
   def get_dz_segment(self,d1,dn,L):
     ''' Calculate the vector of gridpoint spacing given a segment of length L
@@ -383,7 +383,8 @@ def build(layers,substrate=None,gridOpts=GridOpts(),modelOpts=ModelOpts(),quantu
       D = Ld**2/(4*T)
       rnum   = len(dz)
       dtmax  = 0.25/max(D/dz**2)
-      nsteps = scipy.ceil(rnum*f)
+      # nsteps = scipy.ceil(rnum*f)
+      nsteps = scipy.ceil(T/dtmax)
       dt     = T/nsteps;
       ind1   = range(1,rnum)+[rnum-1]
       ind2   = [0]+range(0,rnum-1)
