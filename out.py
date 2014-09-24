@@ -130,10 +130,10 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None,**kwargs):
     else:
       zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
       EcPlot = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ec0,2)/eV
-    zpsi = cond.grid.z*1e9
+    zpsi = cond.grid.z[cond.grid.qIndex]*1e9
     psiSpacing = kwargs['psiSpacing'] if 'psiSpacing' in kwargs else 0.025
     threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-5
-    pylab.plot(zp,EcPlot,'k',zpsi,cond.Efn/eV,'r')
+    pylab.plot(zp,EcPlot,'k',cond.grid.z*1e9,cond.Efn/eV,'r')
     for ii,Ek in enumerate(cond.EcWavefunctions.Ek[0]):
       psisq = cond.EcWavefunctions.psisq[0][:,ii]
       scaleFactor = psiSpacing/max(psisq)
@@ -150,10 +150,10 @@ def ledplot(cond,plotType,isUseSmoothing=True,figNum=None,**kwargs):
     else:
       zp = calc.stretch(cond.grid.z,2)[1:-1]*1e9
       EvPlot = -calc.stretch(cond.phi,2)[1:-1]+calc.stretch(cond.Ev0,2)/eV
-    zpsi = cond.grid.z*1e9
+    zpsi = cond.grid.z[cond.grid.qIndex]*1e9
     psiSpacing = kwargs['psiSpacing'] if 'psiSpacing' in kwargs else 0.025
     threshold = kwargs['threshold'] if 'threshold' in kwargs else 1e-5
-    pylab.plot(zp,EvPlot,'k',zpsi,cond.Efp/eV,'b')
+    pylab.plot(zp,EvPlot,'k',cond.grid.z*1e9,cond.Efp/eV,'b')
     for ii,Ek in enumerate(cond.EvWavefunctions.Ek[0]):
       psisq = cond.EvWavefunctions.psisq[0][:,ii]
       scaleFactor = psiSpacing/max(psisq)
