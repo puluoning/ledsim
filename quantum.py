@@ -23,7 +23,8 @@ class Wavefunctions():
         wavefunctions for this k-point
     '''
     def norm_psi(psi):
-      return normalize(terminate(psi,self.kpSize,self.boundaryType),self.kpSize,self.cond.grid.dz)
+      return normalize(terminate(psi,self.kpSize,self.boundaryType),\
+                       self.kpSize,self.cond.grid.dz[self.cond.grid.qrIndex])
     
     t0 = time.time()
     if self.bandType == 'Ec':
@@ -82,22 +83,6 @@ class Wavefunctions():
       startVal = startValNext
     self.totalTime = time.time()-t0
       
-  def get_carriers(self,cond):
-    ''' Calculate the carrier density.
-    '''         
-    def fc(Ef,E):
-      return 1./(1+scipy.exp((E[:,scipy.newaxis]-Ef-q*(self.phiOrig-cond.phi))/(kB*cond.modelOpts.T)))
-    def fv(Ef,E):
-      return 1.-fc(Ef,E)
-    
-    n = scipy.zeros(len(cond.grid.qIndex))
-    for kpt in self.psiDict.values():
-      if self.bandType == 'Ec':
-        n += scipy.sum(kpt['psisq']*kpt['Vk']*scipy.transpose(fc(cond.Efn[cond.grid.qIndex],kpt['E'])),1)
-      else:
-        n += scipy.sum(kpt['psisq']*kpt['Vk']*scipy.transpose(fv(cond.Efp[cond.grid.qIndex],kpt['E'])),1)
-    return n/(4*pi**2)*self.degen
-
 def terminate(psi,kpSize,boundaryType):
   ''' Terminate psi using the appropriate method given the specified boundary
       condition. When psi is calculated, only the values interior to the domain
@@ -142,7 +127,8 @@ def assemble_hamiltonian(C1,C2,C3,C4,phi,dz,boundaryType='Dirichlet'):
   ''' boundaryType : Dirichlet (psi=0 at boundaries)
       boundaryType : Neumann   (dpsi/dz=0 at boundaries)
       boundaryType : periodic  (psi[0]=psi[-1])
-      boundaryType : extend    (includes reference to points outside simulation domain) 
+      boundaryType : extend    (includes reference to points outside simulation domain)
+      padCount extends the simulation domain by the specified number of gridpoints.
   '''
   def discretize(C1,C2,C3,C4,dz):
     f = scipy.complex128(scipy.zeros((3,len(dz)-1)))
@@ -194,3 +180,33 @@ def assemble_hamiltonian(C1,C2,C3,C4,phi,dz,boundaryType='Dirichlet'):
   else:
     mat = sm.assemble('csr')
     return mat
+
+def get_carriers_quantum(cond,phi,phiN,phiP):
+  ''' Calculate the carrier density at each gridpoint in the quantum region.
+  '''         
+  def fc(Ef,E,phiOrig):
+    return 1./(1+scipy.exp((E[:,scipy.newaxis]-Ef-q*(phiOrig[cond.grid.qIndex]-phi))/(kB*cond.modelOpts.T)))
+  def fv(Ef,E,phiOrig):
+    return 1.-fc(Ef,E,phiOrig)
+    
+  wf = cond.EcWavefunctions
+  Efn = q*(phiN-phi)
+  phiOrig = wf.phiOrig
+  n = scipy.zeros(len(cond.grid.qIndex))
+  for ii in range(len(wf.k)):
+    n += scipy.sum(wf.psisq[ii]*wf.vk[ii]*scipy.transpose(fc(Efn,wf.Ek[ii],phiOrig)),1)
+  n = n/(4*pi**2)*wf.degen
+  
+  wf = cond.EvWavefunctions
+  Efp = q*(phiP-phi)
+  phiOrig = wf.phiOrig
+  p = scipy.zeros(len(cond.grid.qIndex))
+  for ii in range(len(wf.k)):
+    p += scipy.sum(wf.psisq[ii]*wf.vk[ii]*scipy.transpose(fv(Efp,wf.Ek[ii],phiOrig)),1)
+  p = p/(4*pi**2)*wf.degen
+  return n,p
+    
+def calc_gain(cond):
+  '''
+  '''
+  return 0,0
