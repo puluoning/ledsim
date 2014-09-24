@@ -67,8 +67,8 @@ def merge_eigs(eigsDict,tol=1e-6):
     w2,v2 = eigsDict[guess]
     w,v = merge(w,v,w2,v2)
   return w,v
-
-def eigs_sorted(mat,sigma,k,isTime=False):
+ 
+def eigs_sorted(mat,sigma,k,isTime=False,isHermitian=True):
   ''' Get k eigenvalues for the matrix mat using sigma as the guess. If
       isTiming is True, then the raw time spent in scipy.sparse.linalg.eigs
       is returned. The eigenvectors are scaled so that the phase is equal 
@@ -76,7 +76,10 @@ def eigs_sorted(mat,sigma,k,isTime=False):
   '''
   k = min(k,scipy.shape(mat)[0]-2)
   t0 = time.time()
-  eigval,eigvec = scipy.sparse.linalg.eigs(mat,k=k,sigma=sigma)
+  if isHermitian:
+    eigval,eigvec = scipy.sparse.linalg.eigsh(mat,k=k,sigma=sigma)
+  else:
+    eigval,eigvec = scipy.sparse.linalg.eigs(mat,k=k,sigma=sigma)
   eigsTime = time.time()-t0
   w,ind = sort(scipy.real(eigval),'ascend')
   v = eigvec[:,ind]
@@ -88,7 +91,29 @@ def eigs_sorted(mat,sigma,k,isTime=False):
   else:
     return w,v
 
-def eigs_range(mat,startVal,endVal,k=24,tol=1e-6,guessOffset=2,maxitr=100,isGetStats=False):
+def eigs_range(mat,startVal,endVal,isUseSparse=True,isHermitian=True,isGetStats=False):
+  '''
+  '''
+  if isUseSparse:
+    return eigs_range_sparse(mat,startVal,endVal,isHermitian=True,isGetStats=isGetStats)
+  else:
+    t0 = time.time()
+    stats = {}
+    if isHermitian:
+      w,v = scipy.linalg.eigh(mat.todense())
+    else:
+      w,v = scipy.linalg.eig(mat.todense())
+    stats['eigsTime']  = time.time()-t0
+    ind = leq_tol(w,max([startVal,endVal]))*geq_tol(w,min([startVal,endVal]))
+    if True not in ind:
+      dist = w-(startVal+endVal)/2
+      ind[scipy.argmin(dist)] = True
+    stats['numEigs']   = scipy.sum(ind)
+    stats['eigsCalls'] = 1
+    stats['totalTime'] = time.time()-t0
+    return (w[ind],v[:,ind],stats) if isGetStats else (w[ind],v[:,ind])  
+    
+def eigs_range_sparse(mat,startVal,endVal,k=24,tol=1e-6,guessOffset=2,maxitr=100,isHermitian=True,isGetStats=False):
   ''' Find all the eigenvalues of mat between startVal and endVal. This is done
       with multiple calls to scipy.sparse.linalg.eigs, finding k eigenvalues at
       a time. At most maxitr calls are made; if this number is reached without
