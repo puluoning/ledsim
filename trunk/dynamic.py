@@ -84,6 +84,8 @@ class Condition(Access):
        'Tpdef'       : self.get_nonradiative_lifetimes,
        'Vthn'        : self.get_nonradiative_lifetimes,
        'Vthp'        : self.get_nonradiative_lifetimes,
+       'gain'        : self.get_gain,
+       'se'          : self.get_gain,
        'EcWavefunctions' : self.get_wavefunctions_cb,
        'EvWavefunctions' : self.get_wavefunctions_vb}
   
@@ -169,31 +171,6 @@ class Condition(Access):
     self.EvMax = band_max(self.Ev0[0,:])
     self.EvMin = band_min(self.Ev0[0,:])
 
-  def get_carriers_quantum(self,phi,phiN,phiP):
-    ''' Calculate the carrier density at each gridpoint in the quantum region.
-    '''         
-    def fc(Ef,E,phiOrig):
-      return 1./(1+scipy.exp((E[:,scipy.newaxis]-Ef-q*(phiOrig-self.phi))/(kB*self.modelOpts.T)))
-    def fv(Ef,E,phiOrig):
-      return 1.-fc(Ef,E,phiOrig)
-
-    wf = self.EcWavefunctions
-    Efn = q*(phiN-phi)[self.grid.qIndex]
-    phiOrig = wf.phiOrig
-    n = scipy.zeros(len(self.grid.qIndex))
-    for ii in range(len(wf.k)):
-      n += scipy.sum(wf.psisq[ii]*wf.vk[ii]*scipy.transpose(fc(Efn,wf.Ek[ii],phiOrig)),1)
-    n = n/(4*pi**2)*wf.degen
-    
-    wf = self.EvWavefunctions
-    Efp = q*(phiP-phi)[self.grid.qIndex]
-    phiOrig = wf.phiOrig
-    p = scipy.zeros(len(self.grid.qIndex))
-    for ii in range(len(wf.k)):
-      p += scipy.sum(wf.psisq[ii]*wf.vk[ii]*scipy.transpose(fv(Efp,wf.Ek[ii],phiOrig)),1)
-    p = p/(4*pi**2)*wf.degen
-    return n, p
-
   def get_carriers(self,phi,phiN,phiP):
     ''' Get the carriers in each region (i.e. between gridpoints) given the
         specified values for phi, phiN, and phiP. Also calculate the ionized
@@ -229,11 +206,11 @@ class Condition(Access):
     self.Rn[:-1],self.Rp[:-1],self.RNdIonized[:-1],self.RNaIonized[:-1] = \
       self.get_carriers(self.phi[:-1],self.phiN[:-1],self.phiP[:-1])
     if self.modelOpts.quantum:
-      n,p = self.get_carriers_quantum(self.phi,self.phiN,self.phiP)
-      self.Ln[1:]  = n[1:]
-      self.Rn[:-1] = n[:-1]
-      self.Lp[1:]  = p[1:]
-      self.Rp[:-1] = p[:-1]
+      n,p = quantum.get_carriers_quantum(self,self.phi[self.grid.qIndex],self.phiN[self.grid.qIndex],self.phiP[self.grid.qIndex])
+      self.Ln[self.grid.qIndex[1:]]  = n[1:]
+      self.Rn[self.grid.qIndex[:-1]] = n[:-1]
+      self.Lp[self.grid.qIndex[1:]]  = p[1:]
+      self.Rp[self.grid.qIndex[:-1]] = p[:-1]
   
   def get_rho(self):
     ''' Calculate the positive, negative, and total charge density to the left 
@@ -384,7 +361,7 @@ class Condition(Access):
     C2 = self.CHc['C2'](kx,ky)[:,:,self.grid.qrIndex]
     C3 = self.CHc['C3'](kx,ky)[:,:,self.grid.qrIndex]
     C4 = self.CHc['C4'](kx,ky)[:,:,self.grid.qrIndex]
-    padCount = int(self.quantumOpts.padLength/self.grid.dz[self.grid.qrIndex[0]])   
+    padCount = int(self.quantumOpts.padLength/self.grid.gridOpts.dzQuantum)
     return quantum.assemble_hamiltonian(C1,C2,C3,C4,self.phi[self.grid.qIndex],
                                         self.grid.dz[self.grid.qrIndex],boundaryType)
     
@@ -396,6 +373,7 @@ class Condition(Access):
     C2 = self.CHv['C2'](kx,ky)[:,:,self.grid.qrIndex]
     C3 = self.CHv['C3'](kx,ky)[:,:,self.grid.qrIndex]
     C4 = self.CHv['C4'](kx,ky)[:,:,self.grid.qrIndex]  
+    padCount = int(self.quantumOpts.padLength/self.grid.gridOpts.dzQuantum)
     return quantum.assemble_hamiltonian(C1,C2,C3,C4,self.phi[self.grid.qIndex],
                                         self.grid.dz[self.grid.qrIndex],boundaryType)
     
@@ -408,3 +386,8 @@ class Condition(Access):
     '''
     '''
     self.EvWavefunctions = quantum.Wavefunctions(self,'Ev',self.quantumOpts.boundaryType)
+    
+  def get_gain(self):
+    '''
+    '''
+    self.gain,self.se = quantum.get_gain(self)
