@@ -1,0 +1,6 @@
+# LEDSIM #
+Originally named Light Emitting Diode Simulator Implemented in MATLAB, now a Python-based tool for simulating III-Nitride based LEDs. III-Nitride LEDs are of particular importance due to their ability to generate blue light with high efficiency; combined with wavelength-converting materials such as phosphors, these LEDs can be used to make emitters of white light with efficiency far exceeding incandescent or fluorescent sources.
+
+LEDSIM allows calculation of band diagrams, current-voltage characteristics, radiative efficiency, and loss channels for III-Nitride LEDs. The basic method involves the self-consistent solution of the Poisson equation with continuitiy equations for electrons and holes. Carrier densities and recombination rates are calculated classically. Current and voltage boundary conditions are supported.
+
+This project represents a work in progress, and is updated on an intermittent basis as progress is made. Ongoing work is aimed at incorporating quantum-mechanical elements in the description of carrier transport and recombination.
